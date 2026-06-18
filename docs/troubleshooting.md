@@ -2,7 +2,7 @@
 
 ## Backend Unreachable
 
-Confirm the backend is running and your client is connecting to `ws://localhost:8000/v1/transcribe`. Check `/health` with a browser or `curl`.
+Confirm the backend is running and your client is connecting to `ws://127.0.0.1:8000/v1/transcribe`. Check `/health` with a browser or `curl`.
 
 ## Desktop Hotkey Does Not Trigger
 
@@ -31,9 +31,13 @@ where cudnn64*.dll
 
 The NVIDIA Docker setup avoids this host DLL problem by using a CUDA/cuDNN runtime image.
 
-## Model Download Slow or Fails
+## Model Missing
 
-Use a smaller model such as `small` or `base`, verify network access, and keep the model cache volume mounted when using Docker.
+Normal startup does not download Whisper models. Run `python scripts/install_model.py large-v3-turbo` from `backend/`, or set `MODEL_PATH` to an existing faster-whisper model directory.
+
+## Backend Rejects Remote URLs
+
+Openflow desktop mode allows only local backend and LLM URLs by default. Enable the matching Advanced setting only when you intentionally use a trusted remote server.
 
 ## No Transcript During Silence
 

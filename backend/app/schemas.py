@@ -62,6 +62,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok"]
     app: str
     model_loaded: bool
+    model_error: str | None = None
     model_name: str
     device: str
     compute_type: str

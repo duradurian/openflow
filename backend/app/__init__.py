@@ -1,1 +1,1 @@
-"""Whisper Live backend package."""
+"""Openflow backend package."""

@@ -7,21 +7,27 @@ from fastapi import FastAPI, WebSocket
 from app.config import Settings, get_settings
 from app.logging_config import configure_logging
 from app.schemas import AVAILABLE_MODELS, HealthResponse, ModelsResponse
+from app.security import validate_runtime_security
 from app.transcriber import WhisperTranscriber
 from app.websocket import handle_transcription_socket
 
 configure_logging()
 logger = logging.getLogger(__name__)
 settings = get_settings()
-transcriber = WhisperTranscriber(settings.MODEL_NAME, settings.DEVICE, settings.COMPUTE_TYPE)
+transcriber = WhisperTranscriber(settings)
 transcription_semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_TRANSCRIPTIONS)
+model_load_error: str | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global model_load_error
+    validate_runtime_security(settings)
     try:
         await asyncio.to_thread(transcriber.load)
+        model_load_error = None
     except Exception:
+        model_load_error = transcriber.load_error or "Model load failed"
         logger.exception("Model load failed; /health will report model_loaded=false")
     yield
 
@@ -35,6 +41,7 @@ async def health() -> HealthResponse:
         status="ok",
         app=settings.APP_NAME,
         model_loaded=transcriber.model_loaded,
+        model_error=model_load_error,
         model_name=settings.MODEL_NAME,
         device=settings.DEVICE,
         compute_type=settings.COMPUTE_TYPE,

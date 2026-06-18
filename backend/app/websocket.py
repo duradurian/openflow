@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from app.config import Settings
 from app.schemas import ErrorEvent, ReadyEvent, StartMessage, StatusEvent, StopMessage
+from app.security import validate_websocket_trust
 from app.session import TranscriptionSession, TranscriberProtocol
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,11 @@ async def handle_transcription_socket(
     transcriber: TranscriberProtocol,
     semaphore,
 ) -> None:
+    trusted, reason = validate_websocket_trust(websocket, settings)
+    if not trusted:
+        await websocket.close(code=1008, reason=reason)
+        return
+
     if settings.REQUIRE_API_TOKEN:
         token = websocket.query_params.get("token") or websocket.headers.get("x-api-token")
         if not token or token != settings.API_TOKEN:

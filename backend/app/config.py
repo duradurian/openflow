@@ -5,10 +5,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "whisper-live-backend"
-    HOST: str = "0.0.0.0"
+    APP_NAME: str = "openflow-backend"
+    HOST: str = "127.0.0.1"
     PORT: int = 8000
+    OPENFLOW_SERVER_MODE: bool = False
     MODEL_NAME: str = "large-v3-turbo"
+    MODELS_DIR: str = "./models"
+    MODEL_PATH: str | None = None
+    ALLOW_MODEL_DOWNLOAD: bool = False
     DEVICE: str = "cuda"
     COMPUTE_TYPE: str = "float16"
     LANGUAGE: str = "en"
@@ -22,6 +26,7 @@ class Settings(BaseSettings):
     MAX_BUFFER_SECONDS: int = 60
     REQUIRE_API_TOKEN: bool = False
     API_TOKEN: str | None = None
+    ALLOWED_ORIGINS: str = ""
     MAX_CONCURRENT_TRANSCRIPTIONS: int = 1
     VAD_ENERGY_THRESHOLD: float = Field(default=0.01, gt=0)
     VAD_MIN_SPEECH_MS: int = 120

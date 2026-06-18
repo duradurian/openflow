@@ -6,6 +6,8 @@ from threading import Lock
 import numpy as np
 
 from app.cuda_runtime import configure_cuda_dll_paths
+from app.config import Settings
+from app.model_store import resolve_model_source
 from app.schemas import TranscriptSegment
 
 logger = logging.getLogger(__name__)
@@ -21,11 +23,27 @@ CUDA_RUNTIME_ERROR_MARKERS = (
 
 
 class WhisperTranscriber:
-    def __init__(self, model_name: str, device: str, compute_type: str) -> None:
-        self.model_name = model_name
-        self.device = device
-        self.compute_type = compute_type
+    def __init__(
+        self,
+        model_name: str | Settings,
+        device: str | None = None,
+        compute_type: str | None = None,
+    ) -> None:
+        if isinstance(model_name, Settings):
+            self.settings = model_name
+        else:
+            self.settings = Settings(
+                MODEL_NAME=model_name,
+                DEVICE=device or "cpu",
+                COMPUTE_TYPE=compute_type or "int8",
+                ALLOW_MODEL_DOWNLOAD=True,
+            )
+        self.model_name = self.settings.MODEL_NAME
+        self.device = self.settings.DEVICE
+        self.compute_type = self.settings.COMPUTE_TYPE
+        self.model_source = self.model_name
         self._model = None
+        self.load_error: str | None = None
         self._segment_counter = itertools.count(1)
         self._load_lock = Lock()
 
@@ -44,17 +62,31 @@ class WhisperTranscriber:
             except ImportError as exc:
                 raise RuntimeError("faster-whisper is not installed") from exc
 
+            model_source, local_files_only = resolve_model_source(self.settings)
+            self.model_source = model_source
             logger.info(
                 "Loading faster-whisper model %s on %s (%s)",
-                self.model_name,
+                model_source,
                 self.device,
                 self.compute_type,
             )
-            self._model = WhisperModel(
-                self.model_name,
-                device=self.device,
-                compute_type=self.compute_type,
-            )
+            kwargs = {
+                "device": self.device,
+                "compute_type": self.compute_type,
+                "local_files_only": local_files_only,
+            }
+            if not local_files_only:
+                kwargs["download_root"] = self.settings.MODELS_DIR
+            try:
+                self._model = WhisperModel(model_source, **kwargs)
+                self.load_error = None
+            except TypeError:
+                kwargs.pop("local_files_only", None)
+                self._model = WhisperModel(model_source, **kwargs)
+                self.load_error = None
+            except Exception as exc:
+                self.load_error = str(exc)
+                raise
 
     def transcribe(
         self,

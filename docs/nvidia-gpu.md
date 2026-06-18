@@ -22,6 +22,7 @@ Then run:
 
 ```bash
 cp backend/.env.example backend/.env
+export API_TOKEN="replace-with-a-long-random-token"
 docker compose up --build backend
 ```
 
@@ -54,7 +55,7 @@ Fix:
 1. Install the Python GPU runtime wheels into the backend venv:
 
 ```powershell
-cd C:\Users\Darrien\Desktop\code\Openflow\whisper-live\backend
+cd backend
 .\.venv\Scripts\python.exe -m pip install -r requirements-gpu-windows.txt
 ```
 
@@ -85,9 +86,9 @@ where cudnn64*.dll
 Then start the backend:
 
 ```powershell
-cd C:\Users\Darrien\Desktop\code\Openflow\whisper-live\backend
+cd backend
 .\.venv\Scripts\Activate.ps1
-uvicorn app.main:app --reload
+python scripts\run_server.py
 ```
 
 ## Temporary CPU Fallback

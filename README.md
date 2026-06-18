@@ -25,8 +25,6 @@ protocol.md           WebSocket message and PCM audio contract
 docker-compose.yml    NVIDIA GPU backend deployment helper
 ```
 
-Some internal package metadata still uses earlier names such as `whisper-live-backend` and `TrueScribe`. The app described by this repository is Openflow.
-
 ## Requirements
 
 - Windows 10 or newer for the desktop app.
@@ -54,7 +52,14 @@ Then:
 4. Press `Ctrl+Alt+Space` again, or release it if hold mode is enabled.
 5. Openflow pastes the finalized transcript into the focused textbox.
 
-On first startup, backend setup and model download can take a while.
+Before the first transcription, install the configured Whisper model once:
+
+```powershell
+cd backend
+python scripts/install_model.py large-v3-turbo
+```
+
+Normal backend startup does not download models. If the model is missing, `/health` reports the setup error.
 
 If PowerShell blocks `npm.ps1`, use the command shim:
 
@@ -74,7 +79,7 @@ cd backend
 .\run_backend.ps1
 ```
 
-The launcher creates `.venv` with Python 3.11 if needed, installs `requirements.txt` and `requirements-gpu-windows.txt`, then starts Uvicorn on port 8000.
+The launcher creates `.venv` with Python 3.11 if needed, installs `requirements.txt` and `requirements-gpu-windows.txt` only during setup, then starts the backend on `127.0.0.1:8000`.
 
 If script execution is blocked:
 
@@ -92,7 +97,8 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-python -m uvicorn app.main:app --reload --app-dir .
+python scripts/install_model.py large-v3-turbo
+python scripts/run_server.py
 ```
 
 For CPU-only machines, edit `backend/.env`:
@@ -128,8 +134,8 @@ The app includes:
 Default desktop endpoints:
 
 ```text
-Backend WebSocket: ws://localhost:8000/v1/transcribe
-Health check:      http://localhost:8000/health
+Backend WebSocket: ws://127.0.0.1:8000/v1/transcribe
+Health check:      http://127.0.0.1:8000/health
 ```
 
 See [desktop/README.md](desktop/README.md) for the full desktop configuration reference.
@@ -147,19 +153,19 @@ WS  /v1/transcribe
 Health check:
 
 ```powershell
-curl http://localhost:8000/health
+curl http://127.0.0.1:8000/health
 ```
 
 List known models:
 
 ```powershell
-curl http://localhost:8000/v1/models
+curl http://127.0.0.1:8000/v1/models
 ```
 
 WebSocket clients connect to:
 
 ```text
-ws://localhost:8000/v1/transcribe
+ws://127.0.0.1:8000/v1/transcribe
 ```
 
 The client sends a JSON `start` message, then binary little-endian signed 16-bit PCM audio: mono, 16 kHz. The backend emits `ready`, status, partial transcript, final transcript, and error events.
@@ -179,7 +185,7 @@ Stream a WAV file through the live WebSocket path:
 
 ```powershell
 cd backend
-python scripts/stream_wav.py path\to\audio.wav --url ws://localhost:8000/v1/transcribe
+python scripts/stream_wav.py path\to\audio.wav --url ws://127.0.0.1:8000/v1/transcribe
 ```
 
 Benchmark models:
@@ -195,6 +201,11 @@ Backend settings are loaded from `backend/.env`. Important defaults:
 
 ```env
 MODEL_NAME=large-v3-turbo
+MODELS_DIR=./models
+MODEL_PATH=
+ALLOW_MODEL_DOWNLOAD=false
+HOST=127.0.0.1
+OPENFLOW_SERVER_MODE=false
 DEVICE=cuda
 COMPUTE_TYPE=float16
 LANGUAGE=en
@@ -207,7 +218,7 @@ REQUIRE_API_TOKEN=false
 API_TOKEN=
 ```
 
-Set `REQUIRE_API_TOKEN=true` and `API_TOKEN=...` to require a token for WebSocket clients.
+Set `OPENFLOW_SERVER_MODE=true`, `REQUIRE_API_TOKEN=true`, and `API_TOKEN=...` only when intentionally exposing the backend outside local desktop mode.
 
 ## Local LLM Refinement
 
@@ -227,10 +238,11 @@ The included Docker setup is NVIDIA-first and runs only the backend.
 
 ```powershell
 Copy-Item backend\.env.example backend\.env
+$env:API_TOKEN="replace-with-a-long-random-token"
 docker compose up --build backend
 ```
 
-Compose builds `backend/Dockerfile`, exposes port 8000, requests `gpus: all`, and stores model cache data in the `whisper_model_cache` volume. Install NVIDIA Container Toolkit before using this path.
+Compose builds `backend/Dockerfile`, publishes port 8000 on `127.0.0.1` only, requires `API_TOKEN`, requests `gpus: all`, and stores model cache data in the `whisper_model_cache` volume. Install NVIDIA Container Toolkit before using this path.
 
 ## Development Checks
 

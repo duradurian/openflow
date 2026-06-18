@@ -7,8 +7,9 @@ Returns backend and model status.
 ```json
 {
   "status": "ok",
-  "app": "whisper-live-backend",
+  "app": "openflow-backend",
   "model_loaded": true,
+  "model_error": null,
   "model_name": "large-v3-turbo",
   "device": "cuda",
   "compute_type": "float16"
@@ -43,3 +44,5 @@ The client sends a `start` JSON message, then binary PCM frames. The server send
 ## Optional API Token
 
 Set `REQUIRE_API_TOKEN=true` and `API_TOKEN=...`. Clients can pass `?token=...` on the WebSocket URL or `x-api-token` where supported.
+
+Non-loopback/server mode requires `OPENFLOW_SERVER_MODE=true`, `REQUIRE_API_TOKEN=true`, and a non-empty `API_TOKEN`.

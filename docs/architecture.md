@@ -1,6 +1,6 @@
 # Architecture
 
-Whisper Live is a local dictation stack. The backend owns API validation, transcription sessions, VAD, faster-whisper inference, and transcript event generation. The desktop client owns the Windows hotkey, microphone capture, and text insertion.
+Openflow is a local dictation stack. The backend owns API validation, transcription sessions, VAD, faster-whisper inference, and transcript event generation. The desktop client owns the Windows hotkey, microphone capture, and text insertion.
 
 ## Components
 

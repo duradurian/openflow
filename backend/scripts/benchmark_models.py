@@ -1,9 +1,15 @@
 import argparse
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 from app.config import get_settings
+from app.config import Settings
 from app.schemas import AVAILABLE_MODELS
 from app.transcriber import WhisperTranscriber
 
@@ -18,7 +24,15 @@ def main() -> None:
     settings = get_settings()
     audio = np.zeros(settings.SAMPLE_RATE * args.seconds, dtype=np.float32)
     for model_name in args.models:
-        transcriber = WhisperTranscriber(model_name, settings.DEVICE, settings.COMPUTE_TYPE)
+        model_settings = Settings(
+            MODEL_NAME=model_name,
+            MODELS_DIR=settings.MODELS_DIR,
+            DEVICE=settings.DEVICE,
+            COMPUTE_TYPE=settings.COMPUTE_TYPE,
+            LANGUAGE=settings.LANGUAGE,
+            ALLOW_MODEL_DOWNLOAD=settings.ALLOW_MODEL_DOWNLOAD,
+        )
+        transcriber = WhisperTranscriber(model_settings)
         started = time.perf_counter()
         transcriber.transcribe(audio, settings.SAMPLE_RATE, settings.LANGUAGE, args.mode)
         elapsed = time.perf_counter() - started

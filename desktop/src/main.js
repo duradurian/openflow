@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, Tray, clipboard, globalShortcut, ipcMain, nati
 const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { PRODUCT_NAME, SETTINGS_TITLE, ADVANCED_SETTINGS_TITLE } = require("./product_identity");
 const {
   DEFAULT_LLAMACPP_URL,
   DEFAULT_LLM_URL,
@@ -14,10 +15,18 @@ const {
   unloadOtherOllamaModels,
   unloadOllamaModel,
 } = require("./text_processor");
+const { sanitizeBackendUrl, sanitizeHttpServiceUrl } = require("./url_policy");
+const {
+  assertTrustedFileSender,
+  installPermissionPolicy,
+  isTrustedFileSender,
+  secureWebPreferences,
+} = require("./window_security");
 
 const DEFAULT_CONFIG = {
-  backendUrl: "ws://localhost:8000/v1/transcribe",
-  healthUrl: "http://localhost:8000/health",
+  backendUrl: "ws://127.0.0.1:8000/v1/transcribe",
+  healthUrl: "http://127.0.0.1:8000/health",
+  allowRemoteBackend: false,
   hotkey: "CommandOrControl+Alt+Space",
   language: "en",
   mode: "fast",
@@ -32,6 +41,7 @@ const DEFAULT_CONFIG = {
   llmModel: "local",
   ollamaServerUrl: DEFAULT_OLLAMA_URL,
   ollamaModel: "",
+  allowRemoteLlm: false,
   llmMode: "grammar",
   llmLatencyBudgetMs: 700,
   llmMaxBlockingChars: 250,
@@ -117,12 +127,18 @@ function sanitizeConfig(nextConfig) {
   const llmProvider = ["llamacpp", "ollama"].includes(nextConfig?.llmProvider)
     ? nextConfig.llmProvider
     : DEFAULT_CONFIG.llmProvider;
+  const allowRemoteBackend = booleanSetting(
+    nextConfig?.allowRemoteBackend,
+    DEFAULT_CONFIG.allowRemoteBackend,
+  );
+  const allowRemoteLlm = booleanSetting(nextConfig?.allowRemoteLlm, DEFAULT_CONFIG.allowRemoteLlm);
 
   return {
     ...DEFAULT_CONFIG,
     ...nextConfig,
-    backendUrl: String(nextConfig?.backendUrl || DEFAULT_CONFIG.backendUrl).trim(),
-    healthUrl: String(nextConfig?.healthUrl || DEFAULT_CONFIG.healthUrl).trim(),
+    backendUrl: sanitizeBackendUrl(nextConfig?.backendUrl, DEFAULT_CONFIG.backendUrl, allowRemoteBackend),
+    healthUrl: sanitizeHttpServiceUrl(nextConfig?.healthUrl, DEFAULT_CONFIG.healthUrl, allowRemoteBackend),
+    allowRemoteBackend,
     hotkey: isSafeAccelerator(hotkey) ? hotkey : DEFAULT_CONFIG.hotkey,
     language: nextConfig?.language ? String(nextConfig.language).trim() : null,
     mode: nextConfig?.mode === "accurate" ? "accurate" : "fast",
@@ -133,10 +149,15 @@ function sanitizeConfig(nextConfig) {
     autoStartBackend: booleanSetting(nextConfig?.autoStartBackend, DEFAULT_CONFIG.autoStartBackend),
     llmEnabled: booleanSetting(nextConfig?.llmEnabled, DEFAULT_CONFIG.llmEnabled),
     llmProvider,
-    llmServerUrl: String(nextConfig?.llmServerUrl || DEFAULT_LLM_URL).trim(),
+    llmServerUrl: sanitizeHttpServiceUrl(nextConfig?.llmServerUrl, DEFAULT_LLM_URL, allowRemoteLlm),
     llmModel: String(nextConfig?.llmModel || DEFAULT_CONFIG.llmModel).trim(),
-    ollamaServerUrl: String(nextConfig?.ollamaServerUrl || DEFAULT_CONFIG.ollamaServerUrl).trim(),
+    ollamaServerUrl: sanitizeHttpServiceUrl(
+      nextConfig?.ollamaServerUrl,
+      DEFAULT_CONFIG.ollamaServerUrl,
+      allowRemoteLlm,
+    ),
     ollamaModel: String(nextConfig?.ollamaModel || DEFAULT_CONFIG.ollamaModel).trim(),
+    allowRemoteLlm,
     llmMode,
     llmLatencyBudgetMs: numericSetting(
       nextConfig?.llmLatencyBudgetMs,
@@ -330,13 +351,11 @@ function createRecorderWindow() {
     width: 240,
     height: 160,
     show: false,
-    webPreferences: {
+    title: `${PRODUCT_NAME} Recorder`,
+    webPreferences: secureWebPreferences({
       preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
       backgroundThrottling: false,
-    },
+    }),
   });
 
   recorderWindow.loadFile(path.join(__dirname, "recorder.html"));
@@ -354,12 +373,10 @@ function createStatusWindow() {
     focusable: false,
     show: false,
     transparent: true,
-    webPreferences: {
+    title: `${PRODUCT_NAME} Status`,
+    webPreferences: secureWebPreferences({
       preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
+    }),
   });
 
   statusWindow.loadFile(path.join(__dirname, "status.html"));
@@ -434,13 +451,10 @@ function createSettingsWindow() {
     maximizable: false,
     fullscreenable: false,
     show: false,
-    title: "TrueScribe Settings",
-    webPreferences: {
+    title: SETTINGS_TITLE,
+    webPreferences: secureWebPreferences({
       preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
+    }),
   });
 
   settingsWindow.loadFile(path.join(__dirname, "settings.html"));
@@ -479,14 +493,11 @@ function createAdvancedSettingsWindow() {
     maximizable: false,
     fullscreenable: false,
     show: false,
-    title: "TrueScribe Advanced Settings",
+    title: ADVANCED_SETTINGS_TITLE,
     parent: settingsWindow && !settingsWindow.isDestroyed() ? settingsWindow : undefined,
-    webPreferences: {
+    webPreferences: secureWebPreferences({
       preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
+    }),
   });
 
   advancedSettingsWindow.loadFile(path.join(__dirname, "advanced_settings.html"));
@@ -777,7 +788,7 @@ async function startBackendIfNeeded() {
 
   const python = path.join(backendDir, ".venv", "Scripts", "python.exe");
   if (fs.existsSync(python)) {
-    backendProcess = spawn(python, ["-m", "uvicorn", "app.main:app", "--app-dir", "."], {
+    backendProcess = spawn(python, ["scripts\\run_server.py"], {
       cwd: backendDir,
       windowsHide: true,
       stdio: "ignore",
@@ -927,42 +938,58 @@ async function completeDictation(text) {
   refinement.catch(() => {});
 }
 
-ipcMain.on("dictation:complete", (_event, payload) => {
+function trustedOn(channel, handler) {
+  ipcMain.on(channel, (event, ...args) => {
+    if (!isTrustedFileSender(event)) {
+      return;
+    }
+    handler(event, ...args);
+  });
+}
+
+function trustedHandle(channel, handler) {
+  ipcMain.handle(channel, (event, ...args) => {
+    assertTrustedFileSender(event);
+    return handler(event, ...args);
+  });
+}
+
+trustedOn("dictation:complete", (_event, payload) => {
   completeDictation(payload?.text || "").catch(() => {
     pasteText(payload?.text || "", "LLM unavailable, inserted transcript");
   });
 });
 
-ipcMain.on("dictation:error", (_event, payload) => {
+trustedOn("dictation:error", (_event, payload) => {
   isRecording = false;
   setTrayMenu();
   showStatus("error", payload?.message || "Dictation failed", true);
 });
 
-ipcMain.on("dictation:status", (_event, payload) => {
+trustedOn("dictation:status", (_event, payload) => {
   if (payload?.message) {
     showStatus(payload.state || "ready", payload.message, payload.sticky);
   }
 });
 
-ipcMain.handle("config:get", () => ({
+trustedHandle("config:get", () => ({
   config,
   configPath: configPath(),
   appVersion: app.getVersion(),
 }));
 
-ipcMain.handle("hotkey-capture:start", () => {
+trustedHandle("hotkey-capture:start", () => {
   isCapturingHotkey = true;
   stopShortcutRegistration();
   return { ok: true };
 });
 
-ipcMain.handle("hotkey-capture:end", () => {
+trustedHandle("hotkey-capture:end", () => {
   isCapturingHotkey = false;
   return { ok: applyShortcutRegistration() };
 });
 
-ipcMain.handle("config:save", (_event, nextConfig) => {
+trustedHandle("config:save", (_event, nextConfig) => {
   const previousConfig = { ...config };
   const next = sanitizeConfig(nextConfig);
   const shortcutChanged = next.hotkey !== config.hotkey || next.inputBehavior !== config.inputBehavior;
@@ -995,19 +1022,20 @@ ipcMain.handle("config:save", (_event, nextConfig) => {
   };
 });
 
-ipcMain.handle("backend:test", async (_event, healthUrl) => {
+trustedHandle("backend:test", async (_event, healthUrl) => {
   const previousHealthUrl = config.healthUrl;
-  config.healthUrl = String(healthUrl || config.healthUrl).trim();
+  config.healthUrl = sanitizeHttpServiceUrl(healthUrl, config.healthUrl, config.allowRemoteBackend);
   const status = await backendStatus();
   config.healthUrl = previousHealthUrl;
   return status;
 });
 
-ipcMain.handle("ollama:models", async (_event, baseUrl) => {
-  return listOllamaModels(baseUrl || config.ollamaServerUrl);
+trustedHandle("ollama:models", async (_event, baseUrl) => {
+  const url = sanitizeHttpServiceUrl(baseUrl, config.ollamaServerUrl, config.allowRemoteLlm);
+  return listOllamaModels(url);
 });
 
-ipcMain.handle("llm:preload", async (_event, nextConfig) => {
+trustedHandle("llm:preload", async (_event, nextConfig) => {
   const preloadConfig = sanitizeConfig({
     ...config,
     ...nextConfig,
@@ -1016,12 +1044,12 @@ ipcMain.handle("llm:preload", async (_event, nextConfig) => {
   return preloadConfiguredLlm(preloadConfig, { force: true });
 });
 
-ipcMain.handle("advanced-settings:open", () => {
+trustedHandle("advanced-settings:open", () => {
   openAdvancedSettingsWindow();
   return { ok: true };
 });
 
-ipcMain.handle("app-status:get", async () => {
+trustedHandle("app-status:get", async () => {
   const status = await backendStatus();
   return {
     isRecording,
@@ -1034,7 +1062,7 @@ ipcMain.handle("app-status:get", async () => {
   };
 });
 
-ipcMain.handle("settings-window:fit", (_event, size) => fitSettingsWindowToContent(size));
+trustedHandle("settings-window:fit", (_event, size) => fitSettingsWindowToContent(size));
 
 app.whenReady().then(async () => {
   loadConfig();
@@ -1043,16 +1071,13 @@ app.whenReady().then(async () => {
 
   app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
-  require("electron").session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    callback(permission === "media");
-  });
-
   createRecorderWindow();
   createStatusWindow();
   createSettingsWindow();
+  installPermissionPolicy(require("electron").session.defaultSession, () => recorderWindow);
 
   tray = new Tray(createTrayIcon());
-  tray.setToolTip("TrueScribe");
+  tray.setToolTip(PRODUCT_NAME);
   tray.on("double-click", openSettingsWindow);
   setTrayMenu();
 
@@ -1077,6 +1102,6 @@ app.on("before-quit", () => {
 
 app.on("activate", () => {
   if (!isQuitting) {
-    showStatus("ready", "TrueScribe is running");
+    showStatus("ready", `${PRODUCT_NAME} is running`);
   }
 });

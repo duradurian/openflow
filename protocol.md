@@ -1,4 +1,4 @@
-# Whisper Live WebSocket Protocol
+# Openflow WebSocket Protocol
 
 The backend exposes `WS /v1/transcribe`. JSON frames are used for control and transcript events. Binary frames are raw little-endian signed 16-bit PCM, mono, 16 kHz.
 

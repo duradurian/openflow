@@ -2,13 +2,20 @@
 
 ## Backend
 
-```bash
+```powershell
 cd backend
 python -m venv .venv
-. .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python scripts/install_model.py large-v3-turbo
+python scripts/run_server.py
 ```
+
+Open `http://127.0.0.1:8000/health`.
+
+Normal backend startup does not download models. Install models explicitly with `scripts/install_model.py`, or set `MODEL_PATH` in `.env` to an existing faster-whisper model directory.
 
 For CPU machines edit `.env`:
 
@@ -26,21 +33,28 @@ COMPUTE_TYPE=float16
 
 On native Windows Python, CUDA Toolkit 12.x and cuDNN for CUDA 12.x must be installed and visible on `PATH`. See `nvidia-gpu.md`.
 
-Run:
+## Windows Launcher
 
-```bash
-uvicorn app.main:app --reload
+```powershell
+cd backend
+.\run_backend.ps1
 ```
 
-Open `http://localhost:8000/health`.
+The launcher installs dependencies only when it creates the venv, or when you run:
 
-## First Run
+```powershell
+.\run_backend.ps1 -Setup
+```
 
-The first backend startup can be slow because CTranslate2/faster-whisper may download model files into the cache volume or user cache directory.
+If PowerShell script execution is blocked, run:
+
+```powershell
+.\run_backend.bat --setup
+```
 
 ## Desktop Client
 
-From the repository root, install the Electron app dependencies, then start Electron:
+From the repository root:
 
 ```powershell
 cd desktop
@@ -48,28 +62,6 @@ npm install
 npm start
 ```
 
-`npm install` is only needed the first time, or after the desktop dependencies change.
-
-If PowerShell reports that `npm.ps1` cannot be loaded because script execution is disabled, use the Windows command shim:
-
-```powershell
-npm.cmd install
-npm.cmd start
-```
-
-The desktop app tries to start the backend automatically. If that does not work, start the backend in a separate PowerShell window:
-
-```powershell
-cd backend
-.\run_backend.ps1
-```
-
-If PowerShell script execution is blocked, run:
-
-```powershell
-.\run_backend.bat
-```
-
-Then run `npm start` again from `desktop/`.
+The desktop app connects to `ws://127.0.0.1:8000/v1/transcribe` by default and rejects remote backend URLs unless the Advanced setting `Allow remote backend URLs` is enabled.
 
 The desktop app registers `Ctrl+Alt+Space` by default. Press once to start microphone dictation, then press again to stop and paste the transcript into the focused textbox.

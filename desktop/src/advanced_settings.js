@@ -1,6 +1,7 @@
 const DEFAULT_ADVANCED = {
-  backendUrl: "ws://localhost:8000/v1/transcribe",
-  healthUrl: "http://localhost:8000/health",
+  backendUrl: "ws://127.0.0.1:8000/v1/transcribe",
+  healthUrl: "http://127.0.0.1:8000/health",
+  allowRemoteBackend: false,
   autoStartBackend: true,
   llmEnabled: false,
   llmProvider: "llamacpp",
@@ -8,6 +9,7 @@ const DEFAULT_ADVANCED = {
   llmModel: "local",
   ollamaServerUrl: "http://localhost:11434",
   ollamaModel: "",
+  allowRemoteLlm: false,
   llmMode: "grammar",
   llmLatencyBudgetMs: 700,
   llmMaxBlockingChars: 250,
@@ -24,6 +26,7 @@ const refreshOllamaModelsButton = document.getElementById("refresh-ollama-models
 const fields = {
   backendUrl: document.getElementById("backendUrl"),
   healthUrl: document.getElementById("healthUrl"),
+  allowRemoteBackend: document.getElementById("allowRemoteBackend"),
   autoStartBackend: document.getElementById("autoStartBackend"),
   llmEnabled: document.getElementById("llmEnabled"),
   llmProvider: document.getElementById("llmProvider"),
@@ -31,6 +34,7 @@ const fields = {
   llmModel: document.getElementById("llmModel"),
   ollamaServerUrl: document.getElementById("ollamaServerUrl"),
   ollamaModel: document.getElementById("ollamaModel"),
+  allowRemoteLlm: document.getElementById("allowRemoteLlm"),
   llmMode: document.getElementById("llmMode"),
   llmLatencyBudgetMs: document.getElementById("llmLatencyBudgetMs"),
   llmMaxBlockingChars: document.getElementById("llmMaxBlockingChars"),
@@ -60,6 +64,7 @@ function readAdvancedConfig() {
     ...currentConfig,
     backendUrl: fields.backendUrl.value.trim(),
     healthUrl: fields.healthUrl.value.trim(),
+    allowRemoteBackend: fields.allowRemoteBackend.checked,
     autoStartBackend: fields.autoStartBackend.checked,
     llmEnabled: fields.llmEnabled.checked,
     llmProvider: fields.llmProvider.value,
@@ -67,6 +72,7 @@ function readAdvancedConfig() {
     llmModel: fields.llmModel.value.trim(),
     ollamaServerUrl: fields.ollamaServerUrl.value.trim(),
     ollamaModel: fields.ollamaModel.value.trim(),
+    allowRemoteLlm: fields.allowRemoteLlm.checked,
     llmMode: fields.llmMode.value,
     llmLatencyBudgetMs: Number(fields.llmLatencyBudgetMs.value),
     llmMaxBlockingChars: Number(fields.llmMaxBlockingChars.value),
@@ -77,6 +83,7 @@ function snapshotConfig(config) {
   return JSON.stringify({
     backendUrl: config.backendUrl,
     healthUrl: config.healthUrl,
+    allowRemoteBackend: Boolean(config.allowRemoteBackend),
     autoStartBackend: Boolean(config.autoStartBackend),
     llmEnabled: Boolean(config.llmEnabled),
     llmProvider: config.llmProvider,
@@ -84,6 +91,7 @@ function snapshotConfig(config) {
     llmModel: config.llmModel,
     ollamaServerUrl: config.ollamaServerUrl,
     ollamaModel: config.ollamaModel,
+    allowRemoteLlm: Boolean(config.allowRemoteLlm),
     llmMode: config.llmMode,
     llmLatencyBudgetMs: Number(config.llmLatencyBudgetMs),
     llmMaxBlockingChars: Number(config.llmMaxBlockingChars),
@@ -136,6 +144,7 @@ function writeFormConfig(config, markSaved = false) {
   currentConfig = config;
   fields.backendUrl.value = config.backendUrl || DEFAULT_ADVANCED.backendUrl;
   fields.healthUrl.value = config.healthUrl || DEFAULT_ADVANCED.healthUrl;
+  fields.allowRemoteBackend.checked = Boolean(config.allowRemoteBackend);
   fields.autoStartBackend.checked = Boolean(config.autoStartBackend);
   fields.llmEnabled.checked = Boolean(config.llmEnabled);
   fields.llmProvider.value = config.llmProvider || DEFAULT_ADVANCED.llmProvider;
@@ -143,6 +152,7 @@ function writeFormConfig(config, markSaved = false) {
   fields.llmModel.value = config.llmModel || DEFAULT_ADVANCED.llmModel;
   fields.ollamaServerUrl.value = config.ollamaServerUrl || DEFAULT_ADVANCED.ollamaServerUrl;
   setOllamaModelOptions([], config.ollamaModel || DEFAULT_ADVANCED.ollamaModel);
+  fields.allowRemoteLlm.checked = Boolean(config.allowRemoteLlm);
   fields.llmMode.value = config.llmMode || DEFAULT_ADVANCED.llmMode;
   fields.llmLatencyBudgetMs.value = Number(config.llmLatencyBudgetMs ?? DEFAULT_ADVANCED.llmLatencyBudgetMs);
   fields.llmMaxBlockingChars.value = Number(config.llmMaxBlockingChars || DEFAULT_ADVANCED.llmMaxBlockingChars);

@@ -1,0 +1,49 @@
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function parseUrl(value) {
+  try {
+    return new URL(String(value || "").trim());
+  } catch {
+    return null;
+  }
+}
+
+function isLocalHost(hostname) {
+  return LOCAL_HOSTS.has(String(hostname || "").toLowerCase());
+}
+
+function sanitizeUrl(value, fallback, options) {
+  const url = parseUrl(value) || parseUrl(fallback);
+  const fallbackUrl = parseUrl(fallback);
+  if (!url || !fallbackUrl) {
+    return String(fallback || "");
+  }
+
+  const protocolAllowed = options.protocols.includes(url.protocol);
+  const hostAllowed = options.allowRemote || isLocalHost(url.hostname);
+  if (!protocolAllowed || !hostAllowed) {
+    return fallbackUrl.toString();
+  }
+
+  return url.toString();
+}
+
+function sanitizeBackendUrl(value, fallback, allowRemote) {
+  return sanitizeUrl(value, fallback, {
+    protocols: ["ws:", "wss:"],
+    allowRemote,
+  });
+}
+
+function sanitizeHttpServiceUrl(value, fallback, allowRemote) {
+  return sanitizeUrl(value, fallback, {
+    protocols: ["http:", "https:"],
+    allowRemote,
+  });
+}
+
+module.exports = {
+  isLocalHost,
+  sanitizeBackendUrl,
+  sanitizeHttpServiceUrl,
+};

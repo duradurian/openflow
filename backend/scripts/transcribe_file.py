@@ -30,7 +30,7 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    transcriber = WhisperTranscriber(settings.MODEL_NAME, settings.DEVICE, settings.COMPUTE_TYPE)
+    transcriber = WhisperTranscriber(settings)
     audio = load_audio(args.path, settings.SAMPLE_RATE)
     segments = transcriber.transcribe(audio, settings.SAMPLE_RATE, args.language or settings.LANGUAGE, args.mode)
     for segment in segments:

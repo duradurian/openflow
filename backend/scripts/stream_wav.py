@@ -58,7 +58,7 @@ async def stream(path: Path, url: str, chunk_ms: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Stream a WAV file to the live transcription WebSocket.")
     parser.add_argument("path", type=Path)
-    parser.add_argument("--url", default="ws://localhost:8000/v1/transcribe")
+    parser.add_argument("--url", default="ws://127.0.0.1:8000/v1/transcribe")
     parser.add_argument("--chunk-ms", type=int, default=100)
     args = parser.parse_args()
     asyncio.run(stream(args.path, args.url, args.chunk_ms))
