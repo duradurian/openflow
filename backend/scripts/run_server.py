@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 
 import uvicorn
@@ -20,7 +21,7 @@ def main() -> None:
         host=settings.HOST,
         port=settings.PORT,
         app_dir=".",
-        reload=True,
+        reload=os.environ.get("OPENFLOW_RELOAD", "").lower() in {"1", "true", "yes"},
     )
 
 

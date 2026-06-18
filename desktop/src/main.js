@@ -723,11 +723,14 @@ async function backendStatus() {
       return { ok: false, state: "offline", message: `HTTP ${response.status}` };
     }
     const body = await response.json();
+    const modelLoaded = Boolean(body.model_loaded);
+    const modelError = body.model_error ? String(body.model_error) : "";
     return {
       ok: true,
-      state: body.model_loaded ? "ready" : "starting",
-      message: body.model_loaded ? "Backend running" : "Backend starting",
-      modelLoaded: Boolean(body.model_loaded),
+      state: modelLoaded ? "ready" : modelError ? "error" : "starting",
+      message: modelLoaded ? "Backend running" : modelError || "Backend starting",
+      modelLoaded,
+      modelError,
       modelName: body.model_name,
       device: body.device,
       computeType: body.compute_type,
@@ -735,6 +738,24 @@ async function backendStatus() {
   } catch {
     return { ok: false, state: "offline", message: "Backend offline" };
   }
+}
+
+async function waitForBackendReady(timeoutMs = 45000) {
+  const started = Date.now();
+  let lastStatus = { ok: false, state: "offline", message: "Backend offline" };
+
+  while (Date.now() - started < timeoutMs) {
+    lastStatus = await backendStatus();
+    if (lastStatus.ok && lastStatus.modelLoaded) {
+      return lastStatus;
+    }
+    if (lastStatus.ok && lastStatus.modelError) {
+      return lastStatus;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  return lastStatus;
 }
 
 function execFileText(command, args, timeoutMs = 1200) {
@@ -827,6 +848,15 @@ async function startDictation() {
   if (!isRecording) {
     return;
   }
+  showStatus("transcribing", "Starting backend...", true);
+  const status = await waitForBackendReady();
+  if (!status.ok || !status.modelLoaded) {
+    isRecording = false;
+    setTrayMenu();
+    showStatus("error", status.message || "Backend is not ready");
+    return;
+  }
+  showStatus("recording", "Listening...", true);
   recorderWindow.webContents.send("dictation:start", config);
 }
 
