@@ -1,7 +1,9 @@
 import re
+import string
 
 
 _SPACE_RE = re.compile(r"\s+")
+_EDGE_PUNCTUATION = string.punctuation + "“”‘’"
 
 
 def normalize_whitespace(text: str) -> str:
@@ -9,14 +11,19 @@ def normalize_whitespace(text: str) -> str:
 
 
 def _tokens(text: str) -> list[str]:
-    return normalize_whitespace(text).lower().split()
+    tokens = []
+    for token in normalize_whitespace(text).lower().split():
+        comparable = token.strip(_EDGE_PUNCTUATION)
+        if comparable:
+            tokens.append(comparable)
+    return tokens
 
 
 def remove_duplicate_overlap(previous_final: str, new_text: str) -> str:
     previous_tokens = _tokens(previous_final)
     raw_new = normalize_whitespace(new_text)
     new_tokens = raw_new.split()
-    comparable_new = [token.lower() for token in new_tokens]
+    comparable_new = [token.strip(_EDGE_PUNCTUATION).lower() for token in new_tokens]
 
     max_overlap = min(len(previous_tokens), len(new_tokens))
     overlap = 0

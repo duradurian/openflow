@@ -5,7 +5,7 @@ function secureWebPreferences(options = {}) {
     ...options,
     contextIsolation: true,
     nodeIntegration: false,
-    sandbox: false,
+    sandbox: true,
   };
 }
 

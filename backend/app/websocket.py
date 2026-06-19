@@ -39,15 +39,14 @@ async def handle_transcription_socket(
         await websocket.close(code=1008, reason=reason)
         return
 
+    token_authenticated = not settings.REQUIRE_API_TOKEN
     if settings.REQUIRE_API_TOKEN:
         token = (
             websocket.headers.get("x-api-token")
             or bearer_token(websocket.headers.get("authorization"))
             or websocket.query_params.get("token")
         )
-        if not is_valid_api_token(token, settings):
-            await websocket.close(code=1008, reason="Unauthorized")
-            return
+        token_authenticated = is_valid_api_token(token, settings)
 
     await websocket.accept()
     session: TranscriptionSession | None = None
@@ -66,7 +65,17 @@ async def handle_transcription_socket(
                     continue
 
                 message_type = payload.get("type")
+                if not token_authenticated and message_type != "start":
+                    await websocket.send_json(error_event("UNAUTHORIZED", "Unauthorized"))
+                    await websocket.close(code=1008, reason="Unauthorized")
+                    return
                 if message_type == "start":
+                    if not token_authenticated:
+                        if not is_valid_api_token(payload.get("api_token"), settings):
+                            await websocket.send_json(error_event("UNAUTHORIZED", "Unauthorized"))
+                            await websocket.close(code=1008, reason="Unauthorized")
+                            return
+                        token_authenticated = True
                     if session:
                         await websocket.send_json(error_event("INVALID_MESSAGE", "Session has already started."))
                         continue

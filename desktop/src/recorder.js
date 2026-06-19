@@ -49,7 +49,7 @@ function downsampleToPcm16(input, inputSampleRate) {
 }
 
 function sendStartMessage() {
-  socket.send(JSON.stringify({
+  const message = {
     type: "start",
     session_id: createSessionId(),
     sample_rate: TARGET_SAMPLE_RATE,
@@ -57,15 +57,15 @@ function sendStartMessage() {
     format: FORMAT,
     language: currentConfig.language || null,
     mode: currentConfig.mode || "fast",
-  }));
+  };
+  if (currentConfig.backendApiToken) {
+    message.api_token = currentConfig.backendApiToken;
+  }
+  socket.send(JSON.stringify(message));
 }
 
 function backendSocketUrl() {
-  const url = new URL(currentConfig.backendUrl);
-  if (currentConfig.backendApiToken && !url.searchParams.has("token")) {
-    url.searchParams.set("token", currentConfig.backendApiToken);
-  }
-  return url.toString();
+  return new URL(currentConfig.backendUrl).toString();
 }
 
 function connectSocket() {

@@ -74,7 +74,8 @@ Final events are permanent:
 ```json
 {
   "type": "status",
-  "status": "listening"
+  "status": "listening",
+  "message": "optional human-readable detail"
 }
 ```
 
@@ -90,4 +91,6 @@ Known status values are `listening`, `speech_started`, `speech_ended`, `transcri
 }
 ```
 
-Common error codes are `INVALID_JSON`, `INVALID_MESSAGE`, `INVALID_AUDIO_FORMAT`, `INVALID_AUDIO_FRAME`, `MISSING_START`, `INFERENCE_FAILURE`, and `UNAUTHORIZED`.
+Common error codes are `INVALID_JSON`, `INVALID_MESSAGE`, `INVALID_AUDIO_FORMAT`, `INVALID_AUDIO_FRAME`, `MISSING_START`, `MODEL_UNAVAILABLE`, `INFERENCE_FAILURE`, and `UNAUTHORIZED`.
+
+When browser WebSocket clients cannot set custom headers and the backend requires a token, the `start` message may include an `api_token` field. Header-based tokens and `?token=...` remain accepted for non-browser clients and backward compatibility.

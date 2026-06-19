@@ -17,3 +17,9 @@ def test_no_overlap_keeps_new_text() -> None:
 
 def test_partial_prefix_cleanup() -> None:
     assert remove_final_prefix_from_partial("this is final", "is final and partial") == "and partial"
+
+
+def test_duplicate_cleanup_ignores_edge_punctuation() -> None:
+    previous = "hello, world"
+    new = "world this continues"
+    assert remove_duplicate_overlap(previous, new) == "this continues"

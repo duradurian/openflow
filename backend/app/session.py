@@ -89,6 +89,7 @@ class TranscriptionSession:
                 events.append(
                     StatusEvent(status="speech_ended", message="Maximum utterance length reached.").model_dump()
                 )
+                events.append(StatusEvent(status="transcribing").model_dump())
                 final = await self._finalize_current_speech()
                 if final:
                     events.append(final.model_dump())
@@ -100,6 +101,7 @@ class TranscriptionSession:
 
         if vad_result.speech_ended and len(self.speech_buffer) > 0:
             events.append(StatusEvent(status="speech_ended").model_dump())
+            events.append(StatusEvent(status="transcribing").model_dump())
             final = await self._finalize_current_speech()
             if final:
                 events.append(final.model_dump())
@@ -110,6 +112,7 @@ class TranscriptionSession:
         self.stopped = True
         events: list[dict] = []
         if len(self.speech_buffer) > 0:
+            events.append(StatusEvent(status="transcribing").model_dump())
             final = await self._finalize_current_speech()
             if final:
                 events.append(final.model_dump())
