@@ -19,7 +19,6 @@ const DEFAULT_ADVANCED = {
 const form = document.getElementById("advanced-form");
 const formMessage = document.getElementById("form-message");
 const versionMessage = document.getElementById("version-message");
-const saveButton = document.getElementById("save-settings");
 const resetAdvancedButton = document.getElementById("reset-advanced");
 const testBackendButton = document.getElementById("test-backend");
 const refreshOllamaModelsButton = document.getElementById("refresh-ollama-models");
@@ -42,9 +41,15 @@ const fields = {
   llmMaxBlockingChars: document.getElementById("llmMaxBlockingChars"),
 };
 
+const ADVANCED_CONFIG_KEYS = Object.keys(fields);
+
 let currentConfig = null;
 let savedSnapshot = "";
 let llmPreloadGeneration = 0;
+let autoSaveTimer = null;
+let isSaving = false;
+let saveQueuedDuringRequest = false;
+let formRevision = 0;
 
 function setMessage(message, type = "") {
   formMessage.textContent = message;
@@ -55,7 +60,6 @@ function setFormDisabled(disabled) {
   for (const element of Object.values(fields)) {
     element.disabled = disabled;
   }
-  saveButton.disabled = disabled || !isDirty();
   resetAdvancedButton.disabled = disabled;
   testBackendButton.disabled = disabled;
   refreshOllamaModelsButton.disabled = disabled;
@@ -89,6 +93,14 @@ function readAdvancedConfig() {
   };
 }
 
+function changedConfigPatch(nextConfig) {
+  return Object.fromEntries(
+    ADVANCED_CONFIG_KEYS
+      .filter((key) => nextConfig[key] !== currentConfig[key])
+      .map((key) => [key, nextConfig[key]]),
+  );
+}
+
 function snapshotConfig(config) {
   return JSON.stringify({
     backendUrl: config.backendUrl,
@@ -115,8 +127,90 @@ function isDirty() {
 
 function updateDirtyState() {
   const dirty = isDirty();
-  saveButton.disabled = !dirty;
-  setMessage(dirty ? "Unsaved changes" : "No unsaved changes", dirty ? "" : "ok");
+  if (!isSaving) {
+    setMessage(dirty ? "Saving changes" : "Saved", dirty ? "" : "ok");
+  }
+}
+
+function queueAutoSave({ immediate = false } = {}) {
+  clearTimeout(autoSaveTimer);
+
+  if (!currentConfig || !isDirty()) {
+    if (!isSaving) {
+      updateDirtyState();
+    }
+    return;
+  }
+
+  if (!form.checkValidity()) {
+    setMessage("Complete valid settings before they can be saved.", "error");
+    return;
+  }
+
+  if (isSaving) {
+    saveQueuedDuringRequest = true;
+    return;
+  }
+
+  setMessage("Saving changes");
+  autoSaveTimer = setTimeout(savePendingChanges, immediate ? 0 : 350);
+}
+
+async function savePendingChanges() {
+  autoSaveTimer = null;
+  if (isSaving) {
+    saveQueuedDuringRequest = true;
+    return;
+  }
+  if (!currentConfig || !isDirty()) {
+    updateDirtyState();
+    return;
+  }
+  if (!form.checkValidity()) {
+    setMessage("Complete valid settings before they can be saved.", "error");
+    return;
+  }
+
+  const configToSave = readAdvancedConfig();
+  const submittedRevision = formRevision;
+  let saveCompleted = false;
+  let hotkeyRegistered = true;
+  isSaving = true;
+  saveQueuedDuringRequest = false;
+  setMessage("Saving changes");
+
+  try {
+    const response = await window.openflow.saveConfig(changedConfigPatch(configToSave));
+    saveCompleted = true;
+    hotkeyRegistered = response.hotkeyRegistered;
+    if (submittedRevision === formRevision) {
+      writeFormConfig(response.config, true);
+    } else {
+      currentConfig = response.config;
+      savedSnapshot = snapshotConfig(response.config);
+    }
+    setMessage(
+      response.hotkeyRegistered ? "Saved" : "Settings saved, but hotkey is unavailable",
+      response.hotkeyRegistered ? "ok" : "error",
+    );
+  } catch (error) {
+    setMessage(error.message || "Could not save changes", "error");
+  } finally {
+    isSaving = false;
+    const shouldSaveLatest = saveQueuedDuringRequest || (saveCompleted && isDirty());
+    saveQueuedDuringRequest = false;
+    if (shouldSaveLatest) {
+      queueAutoSave();
+    } else if (saveCompleted && hotkeyRegistered) {
+      updateDirtyState();
+    }
+  }
+}
+
+function noteFormChange(options) {
+  formRevision += 1;
+  updateDirtyState();
+  queueAutoSave(options);
 }
 
 function syncLlmProviderFields() {
@@ -202,7 +296,7 @@ async function refreshOllamaModels(options = {}) {
     const previousModel = fields.ollamaModel.value;
     setOllamaModelOptions(result.models || [], previousModel);
     if (fields.ollamaModel.value !== previousModel) {
-      updateDirtyState();
+      noteFormChange({ immediate: true });
       preloadSelectedOllamaModel();
     }
     if (!options.silent) {
@@ -245,8 +339,8 @@ async function preloadSelectedOllamaModel() {
   }
 }
 
-form.addEventListener("input", updateDirtyState);
-form.addEventListener("change", updateDirtyState);
+form.addEventListener("input", () => noteFormChange());
+form.addEventListener("change", () => noteFormChange());
 
 fields.llmProvider.addEventListener("change", () => {
   syncLlmProviderFields();
@@ -254,17 +348,14 @@ fields.llmProvider.addEventListener("change", () => {
     refreshOllamaModels({ silent: true });
     preloadSelectedOllamaModel();
   }
-  updateDirtyState();
 });
 
 fields.llmEnabled.addEventListener("change", () => {
   preloadSelectedOllamaModel();
-  updateDirtyState();
 });
 
 fields.ollamaModel.addEventListener("change", () => {
   preloadSelectedOllamaModel();
-  updateDirtyState();
 });
 
 refreshOllamaModelsButton.addEventListener("click", refreshOllamaModels);
@@ -285,31 +376,18 @@ testBackendButton.addEventListener("click", async () => {
 
 resetAdvancedButton.addEventListener("click", () => {
   writeFormConfig({ ...currentConfig, ...DEFAULT_ADVANCED });
-  updateDirtyState();
+  noteFormChange({ immediate: true });
 });
 
-form.addEventListener("submit", async (event) => {
+form.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (!form.reportValidity()) {
-    return;
-  }
-  setFormDisabled(true);
-  setMessage("Saving");
-
-  try {
-    const response = await window.openflow.saveConfig(readAdvancedConfig());
-    writeFormConfig(response.config, true);
-    setMessage(response.hotkeyRegistered ? "No unsaved changes" : "Settings saved, but hotkey unavailable", response.hotkeyRegistered ? "ok" : "error");
-  } catch (error) {
-    setMessage(error.message || "Save failed", "error");
-  } finally {
-    setFormDisabled(false);
-    updateDirtyState();
-  }
+  queueAutoSave({ immediate: true });
 });
 
 window.openflow.onConfigUpdated((nextConfig) => {
-  writeFormConfig(nextConfig, true);
+  if (!isSaving && !isDirty()) {
+    writeFormConfig(nextConfig, true);
+  }
 });
 
 loadSettings();

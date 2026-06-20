@@ -3,7 +3,6 @@ const formMessage = document.getElementById("form-message");
 const versionMessage = document.getElementById("version-message");
 const testBackendButton = document.getElementById("test-backend");
 const testMicButton = document.getElementById("test-mic");
-const saveButton = document.getElementById("save-settings");
 const advancedSettingsButton = document.getElementById("advanced-settings");
 const deviceSelect = document.getElementById("selectedInputDeviceId");
 const hotkeyButton = document.getElementById("hotkey");
@@ -27,6 +26,16 @@ const fields = {
   appendSpace: document.getElementById("appendSpace"),
 };
 
+const BASIC_CONFIG_KEYS = [
+  "hotkey",
+  "language",
+  "mode",
+  "inputBehavior",
+  "selectedInputDeviceId",
+  "autoPaste",
+  "appendSpace",
+];
+
 let currentConfig = null;
 let savedSnapshot = "";
 let recordedHotkey = "";
@@ -34,6 +43,10 @@ let hotkeyBeforeCapture = "";
 let isRecordingHotkey = false;
 let micTestCleanup = null;
 let resizeTimer = null;
+let autoSaveTimer = null;
+let isSaving = false;
+let saveQueuedDuringRequest = false;
+let formRevision = 0;
 
 function requestWindowFit() {
   clearTimeout(resizeTimer);
@@ -113,7 +126,6 @@ function setFormDisabled(disabled) {
   testBackendButton.disabled = disabled;
   testMicButton.disabled = disabled;
   advancedSettingsButton.disabled = disabled;
-  saveButton.disabled = disabled || !isDirty();
 }
 
 function selectedMode() {
@@ -252,6 +264,14 @@ function readFormConfig() {
   };
 }
 
+function changedConfigPatch(nextConfig) {
+  return Object.fromEntries(
+    BASIC_CONFIG_KEYS
+      .filter((key) => nextConfig[key] !== currentConfig[key])
+      .map((key) => [key, nextConfig[key]]),
+  );
+}
+
 function snapshotConfig(config) {
   return JSON.stringify({
     hotkey: config.hotkey,
@@ -270,13 +290,103 @@ function isDirty() {
 
 function updateDirtyState() {
   const dirty = isDirty();
-  saveButton.disabled = !dirty || isRecordingHotkey;
-  if (dirty) {
-    setMessage("Unsaved changes");
-  } else {
-    setMessage("No unsaved changes", "ok");
+  if (!isRecordingHotkey && !isSaving) {
+    setMessage(dirty ? "Saving changes" : "Saved", dirty ? "" : "ok");
   }
   requestWindowFit();
+}
+
+function queueAutoSave({ immediate = false } = {}) {
+  clearTimeout(autoSaveTimer);
+
+  if (!currentConfig || isRecordingHotkey || !isDirty()) {
+    if (!isSaving) {
+      updateDirtyState();
+    }
+    return;
+  }
+
+  if (!form.checkValidity()) {
+    setMessage("Complete valid settings before they can be saved.", "error");
+    return;
+  }
+
+  if (!isSafeAccelerator(recordedHotkey)) {
+    setMessage("Choose a safer hotkey before it can be saved.", "error");
+    return;
+  }
+
+  if (isSaving) {
+    saveQueuedDuringRequest = true;
+    return;
+  }
+
+  setMessage("Saving changes");
+  autoSaveTimer = setTimeout(savePendingChanges, immediate ? 0 : 350);
+}
+
+async function savePendingChanges() {
+  autoSaveTimer = null;
+  if (isSaving) {
+    saveQueuedDuringRequest = true;
+    return;
+  }
+  if (!currentConfig || isRecordingHotkey || !isDirty()) {
+    updateDirtyState();
+    return;
+  }
+  if (!form.checkValidity()) {
+    setMessage("Complete valid settings before they can be saved.", "error");
+    return;
+  }
+  if (!isSafeAccelerator(recordedHotkey)) {
+    setMessage("Choose a safer hotkey before it can be saved.", "error");
+    return;
+  }
+
+  const configToSave = readFormConfig();
+  const submittedRevision = formRevision;
+  let saveCompleted = false;
+  let hotkeyRegistered = false;
+  isSaving = true;
+  saveQueuedDuringRequest = false;
+  setMessage("Saving changes");
+
+  try {
+    const response = await window.openflow.saveConfig(changedConfigPatch(configToSave));
+    saveCompleted = true;
+    hotkeyRegistered = response.hotkeyRegistered;
+
+    if (submittedRevision === formRevision) {
+      writeFormConfig(response.config, true);
+    } else {
+      currentConfig = response.config;
+      savedSnapshot = snapshotConfig(response.config);
+      setRecordedHotkey(response.config.hotkey || "");
+    }
+
+    setMessage(
+      response.hotkeyRegistered ? "Saved" : "Hotkey unavailable; previous shortcut restored",
+      response.hotkeyRegistered ? "ok" : "error",
+    );
+  } catch (error) {
+    setMessage(error.message || "Could not save changes", "error");
+  } finally {
+    isSaving = false;
+    const shouldSaveLatest = saveQueuedDuringRequest || (saveCompleted && isDirty());
+    saveQueuedDuringRequest = false;
+    if (shouldSaveLatest) {
+      queueAutoSave();
+    } else if (saveCompleted && hotkeyRegistered) {
+      updateDirtyState();
+    }
+  }
+}
+
+function noteFormChange(options) {
+  formRevision += 1;
+  updateDirtyState();
+  queueAutoSave(options);
 }
 
 function writeFormConfig(config, markSaved = false) {
@@ -394,7 +504,6 @@ function setHotkeyCaptureControlsDisabled(disabled) {
   testBackendButton.disabled = disabled;
   testMicButton.disabled = disabled;
   advancedSettingsButton.disabled = disabled;
-  saveButton.disabled = true;
   recordHotkeyButton.classList.toggle("hidden", disabled);
   cancelHotkeyButton.classList.toggle("hidden", !disabled);
 }
@@ -433,6 +542,7 @@ async function handleCapturedHotkey(accelerator) {
 
   setRecordedHotkey(accelerator);
   await endHotkeyRecording();
+  noteFormChange({ immediate: true });
 }
 
 async function testMicrophone() {
@@ -533,33 +643,12 @@ window.addEventListener("keydown", async (event) => {
   }
 }, true);
 
-form.addEventListener("input", updateDirtyState);
-form.addEventListener("change", updateDirtyState);
+form.addEventListener("input", () => noteFormChange());
+form.addEventListener("change", () => noteFormChange());
 
-form.addEventListener("submit", async (event) => {
+form.addEventListener("submit", (event) => {
   event.preventDefault();
-
-  if (!isSafeAccelerator(recordedHotkey)) {
-    setMessage("Choose a safer hotkey before saving.", "error");
-    return;
-  }
-
-  setFormDisabled(true);
-  setMessage("Saving");
-
-  try {
-    const response = await window.openflow.saveConfig(readFormConfig());
-    writeFormConfig(response.config, response.hotkeyRegistered);
-    setMessage(
-      response.hotkeyRegistered ? "No unsaved changes" : "Hotkey unavailable",
-      response.hotkeyRegistered ? "ok" : "error",
-    );
-  } catch (error) {
-    setMessage(error.message || "Save failed", "error");
-  } finally {
-    setFormDisabled(false);
-    updateDirtyState();
-  }
+  queueAutoSave({ immediate: true });
 });
 
 testBackendButton.addEventListener("click", async () => {
@@ -587,7 +676,9 @@ advancedSettingsButton.addEventListener("click", () => {
 });
 
 window.openflow.onConfigUpdated((nextConfig) => {
-  writeFormConfig(nextConfig, true);
+  if (!isSaving && !isDirty()) {
+    writeFormConfig(nextConfig, true);
+  }
 });
 window.openflow.onHotkeyCaptureCancelled(() => {
   if (!isRecordingHotkey) {

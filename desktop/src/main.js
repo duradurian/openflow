@@ -1259,9 +1259,10 @@ trustedHandle("hotkey-capture:end", () => {
 
 trustedHandle("config:save", async (_event, nextConfig) => {
   const previousConfig = { ...config };
-  const next = sanitizeConfig(nextConfig);
+  const patch = nextConfig && typeof nextConfig === "object" ? nextConfig : {};
+  const next = sanitizeConfig({ ...config, ...patch });
   const shortcutChanged = next.hotkey !== config.hotkey || next.inputBehavior !== config.inputBehavior;
-  const hotkeySafe = isSafeAccelerator(nextConfig?.hotkey);
+  const hotkeySafe = isSafeAccelerator(next.hotkey);
 
   config = next;
   let hotkeyRegistered = hotkeySafe;
@@ -1275,7 +1276,7 @@ trustedHandle("config:save", async (_event, nextConfig) => {
   }
 
   saveConfig();
-  preloadConfiguredLlmInBackground(config, { force: true });
+  preloadConfiguredLlmInBackground(config);
   notifyConfigUpdated();
   setTrayMenu();
   showStatus(
