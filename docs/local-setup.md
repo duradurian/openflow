@@ -41,5 +41,3 @@ COMPUTE_TYPE=float16
 ```
 
 See [nvidia-gpu.md](nvidia-gpu.md) for native Windows GPU setup.
-
-Then open `http://127.0.0.1:8000/health`. This server is separate from the default desktop worker path; see [backend-api.md](backend-api.md).

@@ -31,7 +31,12 @@ class Settings(BaseSettings):
     VAD_ENERGY_THRESHOLD: float = Field(default=0.01, gt=0)
     VAD_MIN_SPEECH_MS: int = 120
 
-    model_config = SettingsConfigDict(env_file=str(BACKEND_ROOT / ".env"), env_file_encoding="utf-8")
+    # Ignore retired server-only variables in existing local .env files.
+    model_config = SettingsConfigDict(
+        env_file=str(BACKEND_ROOT / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 @lru_cache

@@ -132,7 +132,7 @@ function sanitizeConfig(nextConfig) {
   const llmProvider = ["llamacpp", "ollama"].includes(source.llmProvider)
     ? source.llmProvider
     : DEFAULT_CONFIG.llmProvider;
-  const allowRemoteLlm = booleanSetting(nextConfig?.allowRemoteLlm, DEFAULT_CONFIG.allowRemoteLlm);
+  const allowRemoteLlm = booleanSetting(source.allowRemoteLlm, DEFAULT_CONFIG.allowRemoteLlm);
 
   return {
     ...DEFAULT_CONFIG,
