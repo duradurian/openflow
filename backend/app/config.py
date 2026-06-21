@@ -9,7 +9,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "openflow-backend"
+    APP_NAME: str = "durianflow-backend"
     MODEL_NAME: str = "large-v3-turbo"
     MODELS_DIR: str = "./models"
     MODEL_PATH: str | None = None

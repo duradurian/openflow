@@ -1,6 +1,6 @@
 # NVIDIA GPU Setup
 
-Openflow runs `faster-whisper` in its local Python worker. The Electron desktop
+Durianflow runs `faster-whisper` in its local Python worker. The Electron desktop
 app launches the worker from `backend/.venv/Scripts/python.exe` during
 development, so CUDA DLLs must be visible to that interpreter.
 
@@ -13,7 +13,7 @@ COMPUTE_TYPE=float16
 ```
 
 Run the desktop application and inspect its status window to confirm that the
-model loads. If CUDA loading fails, Openflow can fall back to CPU int8 when
+model loads. If CUDA loading fails, Durianflow can fall back to CPU int8 when
 `FALLBACK_TO_CPU_ON_CUDA_ERROR=true`; set it to `false` to make GPU failures
 explicit.
 

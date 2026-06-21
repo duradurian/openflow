@@ -1,6 +1,6 @@
 # Repository Flow
 
-Openflow is a local Electron dictation application. Electron owns user-facing
+Durianflow is a local Electron dictation application. Electron owns user-facing
 state and the Python worker owns transcription; the worker exposes no network
 listener.
 

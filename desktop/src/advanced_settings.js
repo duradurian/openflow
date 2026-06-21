@@ -158,7 +158,7 @@ async function savePendingChanges() {
   setMessage("Saving changes");
 
   try {
-    const response = await window.openflow.saveConfig(changedConfigPatch(configToSave));
+    const response = await window.durianflow.saveConfig(changedConfigPatch(configToSave));
     saveCompleted = true;
     hotkeyRegistered = response.hotkeyRegistered;
     if (submittedRevision === formRevision) {
@@ -247,7 +247,7 @@ async function loadSettings() {
   setFormDisabled(true);
   setMessage("Loading");
 
-  const response = await window.openflow.getConfig();
+  const response = await window.durianflow.getConfig();
   versionMessage.textContent = `Version ${response.appVersion || "0.1.0"}`;
   writeFormConfig(response.config, true);
 
@@ -265,7 +265,7 @@ async function refreshOllamaModels(options = {}) {
   }
 
   try {
-    const result = await window.openflow.listOllamaModels(fields.ollamaServerUrl.value.trim());
+    const result = await window.durianflow.listOllamaModels(fields.ollamaServerUrl.value.trim());
     const previousModel = fields.ollamaModel.value;
     setOllamaModelOptions(result.models || [], previousModel);
     if (fields.ollamaModel.value !== previousModel) {
@@ -297,7 +297,7 @@ async function preloadSelectedOllamaModel() {
   setMessage("Starting LLM");
 
   try {
-    const result = await window.openflow.preloadLlm(readAdvancedConfig());
+    const result = await window.durianflow.preloadLlm(readAdvancedConfig());
     if (generation !== llmPreloadGeneration) {
       return;
     }
@@ -343,7 +343,7 @@ form.addEventListener("submit", (event) => {
   queueAutoSave({ immediate: true });
 });
 
-window.openflow.onConfigUpdated((nextConfig) => {
+window.durianflow.onConfigUpdated((nextConfig) => {
   if (!isSaving && !isDirty()) {
     writeFormConfig(nextConfig, true);
   }

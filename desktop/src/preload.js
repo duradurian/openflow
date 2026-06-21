@@ -31,7 +31,7 @@ const dictation = Object.freeze({
   onModelState: (callback) => subscribe("dictation:model-state", callback),
 });
 
-contextBridge.exposeInMainWorld("openflow", {
+contextBridge.exposeInMainWorld("durianflow", {
   dictation,
   // Completion remains a one-way notification while the main process owns
   // paste/refinement. It does not expose a general IPC primitive.

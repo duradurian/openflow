@@ -1,7 +1,7 @@
 [project]
-name = "openflow-backend"
+name = "durianflow-backend"
 version = "0.1.0"
-description = "Self-hosted faster-whisper backend for Openflow dictation."
+description = "Self-hosted faster-whisper backend for Durianflow dictation."
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]

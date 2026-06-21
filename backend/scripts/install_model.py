@@ -19,7 +19,7 @@ def resolve_models_dir(value: str) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Install a faster-whisper model for offline Openflow startup.")
+    parser = argparse.ArgumentParser(description="Install a faster-whisper model for offline Durianflow startup.")
     parser.add_argument("model", nargs="?", default="large-v3-turbo", help="Model name or Hugging Face repo id.")
     parser.add_argument("--models-dir", default="./models", help="Directory where local models are stored.")
     parser.add_argument("--force", action="store_true", help="Replace an existing incomplete or stale model directory.")

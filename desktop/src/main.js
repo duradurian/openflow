@@ -846,7 +846,7 @@ function recorderStartConfig() {
 }
 
 function workerLaunchOptions() {
-  const configuredPython = String(process.env.OPENFLOW_PYTHON || "").trim();
+  const configuredPython = String(process.env.DURIANFLOW_PYTHON || "").trim();
   const venvPython = path.join(backendDir, ".venv", "Scripts", "python.exe");
   const command = configuredPython || (fs.existsSync(venvPython) ? venvPython : "python");
   return {
@@ -888,6 +888,10 @@ function createLocalWorkerTransport() {
     }
     if (event.state === "loading") {
       showStatus("transcribing", "Preparing speech model...", true);
+    } else if (event.state === "ready") {
+      // Replace the sticky loading notice once the model finishes loading.
+      // A non-sticky ready status auto-hides after the normal status timeout.
+      showStatus("ready", `Ready: ${config.hotkey}`);
     } else if (event.state === "unavailable") {
       showStatus("error", "Speech model is unavailable", true);
     }

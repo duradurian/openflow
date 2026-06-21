@@ -18,7 +18,7 @@ npm install
 npm start
 ```
 
-The desktop app resolves `backend/.venv/Scripts/python.exe` by default. Set `OPENFLOW_PYTHON` to an explicit interpreter path only when that default is unsuitable.
+The desktop app resolves `backend/.venv/Scripts/python.exe` by default. Set `DURIANFLOW_PYTHON` to an explicit interpreter path only when that default is unsuitable.
 
 Press `Ctrl+Alt+Space` to start dictation, then press it again to stop, finalize, and paste the transcript into the focused textbox.
 

@@ -1,9 +1,9 @@
 {
-  "name": "openflow",
-  "productName": "Openflow",
+  "name": "durianflow",
+  "productName": "Durianflow",
   "version": "0.1.0",
   "private": true,
-  "description": "Windows push-to-talk dictation client for the Openflow backend.",
+  "description": "Windows push-to-talk dictation client for the Durianflow backend.",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",

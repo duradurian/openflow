@@ -76,7 +76,7 @@ Each row supplies the required Status, Reviewer, Date (inherited: 2026-06-20), C
 | ID | Status | Reviewer | Files reviewed | Evidence | Remaining risk | Follow-up issue |
 |---|---|---|---|---|---|---|
 | WORKER-01 | Pass | worker_model | `desktop/src/worker_supervisor.js` | `spawn(command,args,{shell:false})`. | Low | — |
-| WORKER-02 | Fail | worker_model | `desktop/src/main.js`, `desktop/src/worker_supervisor.js` | `OPENFLOW_PYTHON` can choose executable; trust boundary not fixed. | Medium | Not filed |
+| WORKER-02 | Fail | worker_model | `desktop/src/main.js`, `desktop/src/worker_supervisor.js` | `DURIANFLOW_PYTHON` can choose executable; trust boundary not fixed. | Medium | Not filed |
 | WORKER-03 | Pass | worker_model | `desktop/src/worker_supervisor.js`, `backend/app/worker_protocol.py` | 160 KiB/derived bounded frame constants. | Low | — |
 | WORKER-04 | Pass | worker_model | `desktop/src/worker_supervisor.js`, `backend/app/worker_protocol.py`, tests | Malformed JSON/non-object/length frames fail closed. | Low | — |
 | WORKER-05 | Pass | worker_model | `desktop/src/worker_supervisor.js`, `backend/app/worker_protocol.py` | Oversize record is rejected and supervisor stops worker. | Low | — |

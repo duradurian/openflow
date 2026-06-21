@@ -1,6 +1,6 @@
 # Architecture
 
-Openflow is a Windows push-to-talk dictation application. Its local path is main-brokered: the sandboxed Electron recorder captures microphone audio, Electron main validates and routes it, and a supervised Python worker performs VAD and faster-whisper inference over stdio.
+Durianflow is a Windows push-to-talk dictation application. Its local path is main-brokered: the sandboxed Electron recorder captures microphone audio, Electron main validates and routes it, and a supervised Python worker performs VAD and faster-whisper inference over stdio.
 
 ## Default local dictation path
 
@@ -19,7 +19,7 @@ flowchart LR
   Main -->|refine and paste| User
 ```
 
-The recorder has no backend URL, API token, raw IPC primitive, or network connection. It captures and downsamples audio to mono PCM16 at 16 kHz, then uses the narrow `window.openflow.dictation` bridge.
+The recorder has no backend URL, API token, raw IPC primitive, or network connection. It captures and downsamples audio to mono PCM16 at 16 kHz, then uses the narrow `window.durianflow.dictation` bridge.
 
 ## Components
 
@@ -60,4 +60,4 @@ session: idle -> recording -> stopping -> idle
 
 ## Durable state
 
-Openflow does not store transcripts or audio. Active-session audio, VAD state, metrics, and generated events are memory-only. Durable state is limited to the Electron configuration file and model files/cache.
+Durianflow does not store transcripts or audio. Active-session audio, VAD state, metrics, and generated events are memory-only. Durable state is limited to the Electron configuration file and model files/cache.

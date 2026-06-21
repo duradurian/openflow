@@ -32,8 +32,8 @@ function downsampleToPcm16(input, inputSampleRate) {
 }
 
 function dictationApi() {
-  const api = window.openflow && window.openflow.dictation;
-  if (!api) throw new Error("Dictation service is unavailable. Please restart OpenFlow.");
+  const api = window.durianflow && window.durianflow.dictation;
+  if (!api) throw new Error("Dictation service is unavailable. Please restart DurianFlow.");
   return api;
 }
 
@@ -78,7 +78,7 @@ function complete() {
   isCompleting = true;
   const text = transcriptText();
   reset();
-  window.openflow.completeDictation(text);
+  window.durianflow.completeDictation(text);
   isCompleting = false;
 }
 
@@ -89,7 +89,7 @@ function fail(message) {
   // so ensure a live main-process session does not retain queued audio.
   try { dictationApi().cancel().catch(() => {}); } catch {}
   reset();
-  window.openflow.failDictation(message || "Dictation failed");
+  window.durianflow.failDictation(message || "Dictation failed");
   isCompleting = false;
 }
 
@@ -159,7 +159,7 @@ async function start(config = {}) {
     }
     sessionStarted = true;
     await startAudio(config);
-    window.openflow.reportStatus("recording", "Listening...", true);
+    window.durianflow.reportStatus("recording", "Listening...", true);
   } catch (error) {
     if (sessionStarted) {
       // A microphone permission/device failure happens after main has created a
@@ -184,5 +184,5 @@ async function stop() {
   stopTimer = setTimeout(complete, 5000);
 }
 
-window.openflow.onStartDictation?.(start);
-window.openflow.onStopDictation?.(stop);
+window.durianflow.onStartDictation?.(start);
+window.durianflow.onStopDictation?.(stop);

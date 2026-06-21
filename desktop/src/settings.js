@@ -62,7 +62,7 @@ function requestWindowFit() {
         document.documentElement.scrollHeight,
         document.body.scrollHeight,
       ));
-      window.openflow.fitSettingsWindow({ width, height });
+      window.durianflow.fitSettingsWindow({ width, height });
     });
   }, 40);
 }
@@ -351,7 +351,7 @@ async function savePendingChanges() {
   setMessage("Saving changes");
 
   try {
-    const response = await window.openflow.saveConfig(changedConfigPatch(configToSave));
+    const response = await window.durianflow.saveConfig(changedConfigPatch(configToSave));
     saveCompleted = true;
     hotkeyRegistered = response.hotkeyRegistered;
 
@@ -445,7 +445,7 @@ async function loadDevices(selectedDeviceId) {
 
 async function refreshAppStatus() {
   try {
-    const status = await window.openflow.getAppStatus();
+    const status = await window.durianflow.getAppStatus();
     setState(
       recordingState,
       status.isRecording ? "Listening" : status.isStartingDictation ? "Preparing" : "Idle",
@@ -478,7 +478,7 @@ async function loadSettings() {
   setFormDisabled(true);
   setMessage("Loading");
 
-  const response = await window.openflow.getConfig();
+  const response = await window.durianflow.getConfig();
   versionMessage.textContent = `Version ${response.appVersion || "0.1.0"}`;
   writeFormConfig(response.config, true);
   await loadDevices(response.config.selectedInputDeviceId);
@@ -507,7 +507,7 @@ async function beginHotkeyRecording() {
   if (isRecordingHotkey) {
     return;
   }
-  await window.openflow.beginHotkeyCapture();
+  await window.durianflow.beginHotkeyCapture();
   hotkeyBeforeCapture = recordedHotkey;
   isRecordingHotkey = true;
   setHotkeyCaptureControlsDisabled(true);
@@ -521,7 +521,7 @@ async function endHotkeyRecording() {
   isRecordingHotkey = false;
   setHotkeyCaptureControlsDisabled(false);
   hotkeyButton.classList.remove("recording");
-  const result = await window.openflow.endHotkeyCapture();
+  const result = await window.durianflow.endHotkeyCapture();
   if (!result.ok) {
     setMessage(`Could not restore hotkey: ${recordedHotkey}`, "error");
   }
@@ -649,17 +649,17 @@ form.addEventListener("submit", (event) => {
 testMicButton.addEventListener("click", testMicrophone);
 
 advancedSettingsButton.addEventListener("click", () => {
-  window.openflow.openAdvancedSettings().catch((error) => {
+  window.durianflow.openAdvancedSettings().catch((error) => {
     setMessage(error.message || "Could not open advanced settings", "error");
   });
 });
 
-window.openflow.onConfigUpdated((nextConfig) => {
+window.durianflow.onConfigUpdated((nextConfig) => {
   if (!isSaving && !isDirty()) {
     writeFormConfig(nextConfig, true);
   }
 });
-window.openflow.onHotkeyCaptureCancelled(() => {
+window.durianflow.onHotkeyCaptureCancelled(() => {
   if (!isRecordingHotkey) {
     return;
   }
@@ -670,10 +670,10 @@ window.openflow.onHotkeyCaptureCancelled(() => {
   setMessage("Hotkey recording cancelled.");
   updateDirtyState();
 });
-window.openflow.onLlmStatusUpdated((status) => {
+window.durianflow.onLlmStatusUpdated((status) => {
   setLlmStatus(status);
 });
-window.openflow.onRemeasureSettingsWindow(requestWindowFit);
+window.durianflow.onRemeasureSettingsWindow(requestWindowFit);
 
 loadSettings();
 setInterval(refreshAppStatus, 5000);

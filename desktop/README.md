@@ -1,4 +1,4 @@
-# Openflow Desktop
+# Durianflow Desktop
 
 Run the Electron client from this directory:
 
