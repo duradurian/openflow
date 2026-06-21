@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, Tray, clipboard, globalShortcut, ipcMain, nativeImage, screen } = require("electron");
 const { execFile, spawn } = require("child_process");
+const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { PRODUCT_NAME, SETTINGS_TITLE, ADVANCED_SETTINGS_TITLE } = require("./product_identity");
@@ -16,6 +17,7 @@ const {
   unloadOllamaModel,
 } = require("./text_processor");
 const { isLocalHost, sanitizeBackendUrl, sanitizeHttpServiceUrl } = require("./url_policy");
+const { createDictationTransport } = require("./dictation_transport");
 const {
   assertTrustedFileSender,
   installPermissionPolicy,
@@ -37,6 +39,7 @@ const DEFAULT_CONFIG = {
   autoPaste: true,
   appendSpace: true,
   autoStartBackend: true,
+  dictationTransport: "worker",
   llmEnabled: false,
   llmProvider: "llamacpp",
   llmServerUrl: DEFAULT_LLAMACPP_URL,
@@ -57,6 +60,7 @@ let advancedSettingsWindow;
 let tray;
 let backendProcess;
 let backendStartPromise;
+let localWorkerTransport;
 let hotkeyWatcherProcess;
 let isRecording = false;
 let isStartingDictation = false;
@@ -137,6 +141,7 @@ function sanitizeConfig(nextConfig) {
     DEFAULT_CONFIG.allowRemoteBackend,
   );
   const allowRemoteLlm = booleanSetting(nextConfig?.allowRemoteLlm, DEFAULT_CONFIG.allowRemoteLlm);
+  const dictationTransport = nextConfig?.dictationTransport === "legacy" ? "legacy" : "worker";
 
   return {
     ...DEFAULT_CONFIG,
@@ -153,6 +158,7 @@ function sanitizeConfig(nextConfig) {
     autoPaste: booleanSetting(nextConfig?.autoPaste, DEFAULT_CONFIG.autoPaste),
     appendSpace: booleanSetting(nextConfig?.appendSpace, DEFAULT_CONFIG.appendSpace),
     autoStartBackend: booleanSetting(nextConfig?.autoStartBackend, DEFAULT_CONFIG.autoStartBackend),
+    dictationTransport,
     llmEnabled: booleanSetting(nextConfig?.llmEnabled, DEFAULT_CONFIG.llmEnabled),
     llmProvider,
     llmServerUrl: sanitizeHttpServiceUrl(nextConfig?.llmServerUrl, DEFAULT_LLM_URL, allowRemoteLlm),
@@ -951,6 +957,129 @@ async function gpuMemoryStatus() {
   };
 }
 
+function isRecorderSender(event) {
+  return Boolean(
+    recorderWindow
+    && !recorderWindow.isDestroyed()
+    && event?.sender?.id === recorderWindow.webContents.id,
+  );
+}
+
+function assertRecorderSender(event) {
+  assertTrustedFileSender(event);
+  if (!isRecorderSender(event)) {
+    throw new Error("Dictation IPC is only available to the recorder window");
+  }
+}
+
+function recorderStartConfig() {
+  return {
+    language: config.language,
+    mode: config.mode,
+    selectedInputDeviceId: config.selectedInputDeviceId,
+  };
+}
+
+function workerLaunchOptions() {
+  const configuredPython = String(process.env.OPENFLOW_PYTHON || "").trim();
+  const venvPython = path.join(backendDir, ".venv", "Scripts", "python.exe");
+  const command = configuredPython || (fs.existsSync(venvPython) ? venvPython : "python");
+  return {
+    kind: "worker",
+    command,
+    args: [path.join(backendDir, "scripts", "run_worker.py")],
+    cwd: backendDir,
+    // Keep the worker environment intentionally small. PATH is needed for the
+    // interpreter/native DLL loader; backend configuration is read from .env.
+    env: {
+      PATH: process.env.PATH || "",
+      PYTHONUNBUFFERED: "1",
+      PYTHONUTF8: "1",
+    },
+  };
+}
+
+function forwardWorkerEvent(event) {
+  if (!recorderWindow || recorderWindow.isDestroyed()) {
+    return;
+  }
+  if (event.type === "partial" || event.type === "final") {
+    recorderWindow.webContents.send("dictation:transcript", event);
+  } else if (event.type === "status" || event.type === "ready" || event.type === "stopped" || event.type === "canceled") {
+    recorderWindow.webContents.send("dictation:status", event);
+  } else if (event.type === "error") {
+    recorderWindow.webContents.send("dictation:error", event);
+  }
+}
+
+function createLocalWorkerTransport() {
+  if (localWorkerTransport) {
+    return localWorkerTransport;
+  }
+  localWorkerTransport = createDictationTransport(workerLaunchOptions());
+  localWorkerTransport.on("model", (event) => {
+    if (recorderWindow && !recorderWindow.isDestroyed()) {
+      recorderWindow.webContents.send("dictation:model-state", event);
+    }
+    if (event.state === "loading") {
+      showStatus("transcribing", "Preparing speech model...", true);
+    } else if (event.state === "unavailable") {
+      showStatus("error", "Speech model is unavailable", true);
+    }
+  });
+  localWorkerTransport.on("event", forwardWorkerEvent);
+  localWorkerTransport.on("pressure", () => {
+    if (recorderWindow && !recorderWindow.isDestroyed()) {
+      recorderWindow.webContents.send("dictation:status", { status: "backpressure" });
+    }
+  });
+  localWorkerTransport.on("error", (error) => {
+    const message = error?.message || "Transcription worker failed";
+    showStatus("error", message, true);
+    if (recorderWindow && !recorderWindow.isDestroyed()) {
+      recorderWindow.webContents.send("dictation:error", { code: error?.code || "WORKER_FAILURE", message });
+    }
+  });
+  return localWorkerTransport;
+}
+
+async function ensureLocalWorkerReady(signal) {
+  const transport = createLocalWorkerTransport();
+  if (transport.getState().worker === "stopped") {
+    await transport.startWorker();
+  }
+  const initial = transport.getState();
+  if (initial.model === "ready") {
+    return initial;
+  }
+  if (initial.model === "unavailable") {
+    throw new Error("Speech model is unavailable");
+  }
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => cleanup(new Error("Speech model readiness timed out")), 10 * 60 * 1000);
+    const abort = () => cleanup(new Error("Speech model startup canceled"));
+    const model = (event) => {
+      if (event.state === "ready") cleanup(null, transport.getState());
+      if (event.state === "unavailable") cleanup(new Error(event.message || "Speech model is unavailable"));
+    };
+    const failure = (error) => cleanup(error instanceof Error ? error : new Error("Transcription worker failed"));
+    const cleanup = (error, value) => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abort);
+      transport.off("model", model);
+      transport.off("error", failure);
+      if (error) reject(error); else resolve(value);
+    };
+    if (signal?.aborted) {
+      abort();
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    transport.on("model", model);
+    transport.on("error", failure);
+  });
+}
+
 async function startBackendIfNeeded(signal) {
   if (!config.autoStartBackend) {
     return;
@@ -1025,9 +1154,20 @@ async function startDictation() {
   const startAbortController = new AbortController();
   dictationStartAbortController = startAbortController;
   setTrayMenu();
-  showStatus("transcribing", "Starting backend...", true);
+  showStatus("transcribing", config.dictationTransport === "worker" ? "Starting speech worker..." : "Starting backend...", true);
 
   try {
+    if (config.dictationTransport === "worker") {
+      await ensureLocalWorkerReady(startAbortController.signal);
+      if (cancelStartingDictation) {
+        return;
+      }
+      isRecording = true;
+      setTrayMenu();
+      showStatus("recording", "Listening...", true);
+      recorderWindow.webContents.send("dictation:start", recorderStartConfig());
+      return;
+    }
     await startBackendIfNeeded(startAbortController.signal);
     if (cancelStartingDictation) {
       return;
@@ -1241,8 +1381,88 @@ trustedOn("dictation:status", (_event, payload) => {
   }
 });
 
-trustedHandle("config:get", () => ({
-  config,
+trustedHandle("dictation:start/request", async (event, request) => {
+  assertRecorderSender(event);
+  if (config.dictationTransport !== "worker") {
+    return { status: "rejected_legacy_transport", message: "Local worker transport is disabled" };
+  }
+  if (!isRecording) {
+    return { status: "rejected_no_session", message: "Dictation is not active" };
+  }
+  const transport = createLocalWorkerTransport();
+  const state = transport.getState();
+  if (state.worker !== "ready" || state.model !== "ready") {
+    return { status: "rejected_worker_not_ready", message: "Speech worker is not ready" };
+  }
+  const payload = request && typeof request === "object" ? request : {};
+  const sampleRate = Number(payload.sampleRate);
+  const channels = Number(payload.channels);
+  const mode = payload.mode === "accurate" ? "accurate" : "fast";
+  if (sampleRate !== 16000 || channels !== 1 || payload.format !== "pcm_s16le") {
+    return { status: "rejected_over_limit", message: "Expected mono 16 kHz PCM16 audio" };
+  }
+  try {
+    const session = transport.start({
+      sessionId: randomUUID(),
+      sampleRate,
+      channels,
+      format: "pcm_s16le",
+      language: payload.language ? String(payload.language).slice(0, 32) : null,
+      mode,
+    });
+    return { status: "accepted", ...session };
+  } catch (error) {
+    return { status: "rejected_no_session", message: error?.message || "Could not start dictation" };
+  }
+});
+
+trustedHandle("dictation:audio", (event, audio) => {
+  assertRecorderSender(event);
+  if (config.dictationTransport !== "worker" || !localWorkerTransport) {
+    return { status: "rejected_worker_not_ready" };
+  }
+  if (!(audio instanceof ArrayBuffer)) {
+    return { status: "rejected_over_limit", message: "Audio must be an ArrayBuffer" };
+  }
+  try {
+    return localWorkerTransport.sendAudio(Buffer.from(audio))
+      ? { status: "accepted" }
+      : { status: "rejected_backpressure" };
+  } catch (error) {
+    return {
+      status: error?.code === "WORKER_BACKPRESSURE" ? "rejected_backpressure" : "rejected_no_session",
+      message: error?.message,
+    };
+  }
+});
+
+trustedHandle("dictation:stop", (event) => {
+  assertRecorderSender(event);
+  if (config.dictationTransport !== "worker" || !localWorkerTransport) return { status: "rejected_no_session" };
+  try {
+    return localWorkerTransport.stop() ? { status: "accepted" } : { status: "rejected_no_session" };
+  } catch (error) {
+    return { status: "rejected_stopping", message: error?.message };
+  }
+});
+
+trustedHandle("dictation:cancel", (event) => {
+  assertRecorderSender(event);
+  if (config.dictationTransport !== "worker" || !localWorkerTransport) return { status: "rejected_no_session" };
+  try {
+    return localWorkerTransport.cancel() ? { status: "accepted" } : { status: "rejected_no_session" };
+  } catch (error) {
+    return { status: "rejected_canceling", message: error?.message };
+  }
+});
+
+trustedHandle("dictation:state:get", (event) => {
+  assertRecorderSender(event);
+  return localWorkerTransport ? localWorkerTransport.getState() : { worker: "stopped", model: "unknown", session: null };
+});
+
+trustedHandle("config:get", (event) => ({
+  config: isRecorderSender(event) ? { ...config, backendApiToken: "" } : config,
   configPath: configPath(),
   appVersion: app.getVersion(),
 }));
@@ -1325,11 +1545,15 @@ trustedHandle("advanced-settings:open", () => {
 });
 
 trustedHandle("app-status:get", async () => {
-  const status = await backendStatus();
+  const worker = localWorkerTransport?.getState();
+  const status = config.dictationTransport === "worker"
+    ? { ok: worker?.worker === "ready" && worker?.model === "ready", reachable: false, state: worker?.model || "stopped", message: "Local worker" }
+    : await backendStatus();
   return {
     isRecording,
     isStartingDictation,
     isBackendProcessManaged: Boolean(backendProcess),
+    worker,
     backend: status,
     llm: llmStatus(config),
     gpuMemory: await gpuMemoryStatus(),
@@ -1358,7 +1582,13 @@ app.whenReady().then(async () => {
   setTrayMenu();
 
   const hotkeyRegistered = await applyShortcutRegistration();
-  await startBackendIfNeeded();
+  if (config.dictationTransport === "worker") {
+    ensureLocalWorkerReady().catch((error) => {
+      showStatus("error", error?.message || "Could not start speech worker", true);
+    });
+  } else {
+    await startBackendIfNeeded();
+  }
   preloadConfiguredLlmInBackground(config);
   if (hotkeyRegistered) {
     showStatus("ready", `Ready: ${config.hotkey}`);
@@ -1369,6 +1599,11 @@ app.on("window-all-closed", () => {});
 
 app.on("will-quit", () => {
   stopShortcutRegistration();
+  if (localWorkerTransport) {
+    // Electron cannot await will-quit handlers, but an orderly shutdown is
+    // attempted first and the supervisor enforces its timeout.
+    localWorkerTransport.shutdown().catch(() => {});
+  }
   if (backendProcess) {
     backendProcess.kill();
   }

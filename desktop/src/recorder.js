@@ -1,176 +1,49 @@
 const TARGET_SAMPLE_RATE = 16000;
 const CHANNELS = 1;
-const FORMAT = "pcm_s16le";
+const MAX_PENDING_AUDIO = 2;
 
 let mediaStream = null;
 let audioContext = null;
 let sourceNode = null;
 let processorNode = null;
 let muteNode = null;
-let socket = null;
 let isStopping = false;
+let isCompleting = false;
+let pendingAudio = 0;
 let finalSegments = [];
 let latestPartial = "";
-let currentConfig = null;
 let stopTimer = null;
-
-function createSessionId() {
-  if (crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
+let unsubscribe = [];
 
 function downsampleToPcm16(input, inputSampleRate) {
-  if (!input.length) {
-    return new ArrayBuffer(0);
-  }
+  if (!input.length) return new ArrayBuffer(0);
 
   const ratio = inputSampleRate / TARGET_SAMPLE_RATE;
-  const outputLength = Math.floor(input.length / ratio);
-  const output = new Int16Array(outputLength);
-
-  for (let outputIndex = 0; outputIndex < outputLength; outputIndex += 1) {
+  const output = new Int16Array(Math.floor(input.length / ratio));
+  for (let outputIndex = 0; outputIndex < output.length; outputIndex += 1) {
     const start = Math.floor(outputIndex * ratio);
     const end = Math.min(Math.floor((outputIndex + 1) * ratio), input.length);
     let sum = 0;
-    let count = 0;
-
-    for (let inputIndex = start; inputIndex < end; inputIndex += 1) {
-      sum += input[inputIndex];
-      count += 1;
-    }
-
-    const sample = Math.max(-1, Math.min(1, sum / Math.max(1, count)));
+    for (let inputIndex = start; inputIndex < end; inputIndex += 1) sum += input[inputIndex];
+    const sample = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
     output[outputIndex] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
   }
-
   return output.buffer;
 }
 
-function sendStartMessage() {
-  const message = {
-    type: "start",
-    session_id: createSessionId(),
-    sample_rate: TARGET_SAMPLE_RATE,
-    channels: CHANNELS,
-    format: FORMAT,
-    language: currentConfig.language || null,
-    mode: currentConfig.mode || "fast",
-  };
-  if (currentConfig.backendApiToken) {
-    message.api_token = currentConfig.backendApiToken;
-  }
-  socket.send(JSON.stringify(message));
+function dictationApi() {
+  const api = window.openflow && window.openflow.dictation;
+  if (!api) throw new Error("Dictation service is unavailable. Please restart OpenFlow.");
+  return api;
 }
 
-function backendSocketUrl() {
-  return new URL(currentConfig.backendUrl).toString();
+function transcriptText() {
+  return finalSegments.join(" ").trim() || latestPartial.trim();
 }
 
-function connectSocket() {
-  return new Promise((resolve, reject) => {
-    socket = new WebSocket(backendSocketUrl());
-    socket.binaryType = "arraybuffer";
-
-    socket.onopen = () => {
-      sendStartMessage();
-      resolve();
-    };
-
-    socket.onmessage = (event) => {
-      if (typeof event.data !== "string") {
-        return;
-      }
-
-      let message;
-      try {
-        message = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-
-      if (message.type === "final" && message.text) {
-        finalSegments.push(message.text);
-      } else if (message.type === "partial" && message.text) {
-        latestPartial = message.text;
-      } else if (message.type === "status" && message.status === "stopped") {
-        complete();
-      } else if (message.type === "error") {
-        fail(message.message || message.code || "Backend error");
-      }
-    };
-
-    socket.onerror = () => {
-      reject(new Error("Could not connect to the transcription backend"));
-    };
-
-    socket.onclose = () => {
-      if (isStopping) {
-        complete();
-      } else if (socket) {
-        fail("Transcription backend disconnected");
-      }
-    };
-  });
-}
-
-async function startAudio() {
-  const audioConstraints = {
-    channelCount: CHANNELS,
-    echoCancellation: false,
-    noiseSuppression: true,
-    autoGainControl: true,
-  };
-
-  if (currentConfig.selectedInputDeviceId) {
-    audioConstraints.deviceId = { exact: currentConfig.selectedInputDeviceId };
-  }
-
-  mediaStream = await navigator.mediaDevices.getUserMedia({
-    audio: audioConstraints,
-    video: false,
-  });
-
-  audioContext = new AudioContext();
-  sourceNode = audioContext.createMediaStreamSource(mediaStream);
-  processorNode = audioContext.createScriptProcessor(4096, CHANNELS, CHANNELS);
-  muteNode = audioContext.createGain();
-  muteNode.gain.value = 0;
-
-  processorNode.onaudioprocess = (event) => {
-    if (!socket || socket.readyState !== WebSocket.OPEN || isStopping) {
-      return;
-    }
-
-    const input = event.inputBuffer.getChannelData(0);
-    const pcm = downsampleToPcm16(input, audioContext.sampleRate);
-    if (pcm.byteLength > 0) {
-      socket.send(pcm);
-    }
-  };
-
-  sourceNode.connect(processorNode);
-  processorNode.connect(muteNode);
-  muteNode.connect(audioContext.destination);
-}
-
-async function start(config) {
-  if (socket || audioContext) {
-    return;
-  }
-
-  try {
-    currentConfig = config;
-    isStopping = false;
-    finalSegments = [];
-    latestPartial = "";
-    await connectSocket();
-    await startAudio();
-    window.openflow.reportStatus("recording", "Listening...", true);
-  } catch (error) {
-    fail(error.message || "Could not start dictation");
-  }
+function removeSubscriptions() {
+  for (const unsubscribeListener of unsubscribe) unsubscribeListener();
+  unsubscribe = [];
 }
 
 function stopAudio() {
@@ -179,18 +52,10 @@ function stopAudio() {
     processorNode.onaudioprocess = null;
     processorNode = null;
   }
-  if (muteNode) {
-    muteNode.disconnect();
-    muteNode = null;
-  }
-  if (sourceNode) {
-    sourceNode.disconnect();
-    sourceNode = null;
-  }
+  if (muteNode) { muteNode.disconnect(); muteNode = null; }
+  if (sourceNode) { sourceNode.disconnect(); sourceNode = null; }
   if (mediaStream) {
-    for (const track of mediaStream.getTracks()) {
-      track.stop();
-    }
+    for (const track of mediaStream.getTracks()) track.stop();
     mediaStream = null;
   }
   if (audioContext) {
@@ -199,55 +64,125 @@ function stopAudio() {
   }
 }
 
-function stop() {
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    complete();
-    return;
-  }
-
-  isStopping = true;
-  stopAudio();
-  socket.send(JSON.stringify({ type: "stop" }));
+function reset() {
   clearTimeout(stopTimer);
-  stopTimer = setTimeout(() => complete(), 5000);
-}
-
-function transcriptText() {
-  const finals = finalSegments.join(" ").trim();
-  return finals || latestPartial.trim();
-}
-
-function cleanupSocket() {
-  if (socket) {
-    socket.onopen = null;
-    socket.onmessage = null;
-    socket.onerror = null;
-    socket.onclose = null;
-    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
-      socket.close();
-    }
-    socket = null;
-  }
+  stopTimer = null;
+  stopAudio();
+  removeSubscriptions();
+  pendingAudio = 0;
+  isStopping = false;
 }
 
 function complete() {
-  clearTimeout(stopTimer);
-  stopAudio();
+  if (isCompleting) return;
+  isCompleting = true;
   const text = transcriptText();
-  cleanupSocket();
-  isStopping = false;
-  currentConfig = null;
+  reset();
   window.openflow.completeDictation(text);
+  isCompleting = false;
 }
 
 function fail(message) {
-  clearTimeout(stopTimer);
-  stopAudio();
-  cleanupSocket();
-  isStopping = false;
-  currentConfig = null;
-  window.openflow.failDictation(message);
+  if (isCompleting) return;
+  isCompleting = true;
+  // Failure may originate in the renderer (for example a rejected IPC call),
+  // so ensure a live main-process session does not retain queued audio.
+  try { dictationApi().cancel().catch(() => {}); } catch {}
+  reset();
+  window.openflow.failDictation(message || "Dictation failed");
+  isCompleting = false;
 }
 
-window.openflow.onStartDictation(start);
-window.openflow.onStopDictation(stop);
+function listen() {
+  const api = dictationApi();
+  unsubscribe = [
+    api.onTranscript((event = {}) => {
+      if (event.type === "final" && event.text) finalSegments.push(event.text);
+      if (event.type === "partial" && event.text) latestPartial = event.text;
+    }),
+    api.onStatus((event = {}) => {
+      if (event.state === "stopped" || event.status === "stopped") complete();
+    }),
+    api.onError((event = {}) => fail(event.message || event.code || "Transcription error")),
+    api.onModelState((event = {}) => {
+      if (event.state === "error") fail(event.message || "Transcription model unavailable");
+    }),
+  ];
+}
+
+async function startAudio(config) {
+  const audio = { channelCount: CHANNELS, echoCancellation: false, noiseSuppression: true, autoGainControl: true };
+  if (config.selectedInputDeviceId) audio.deviceId = { exact: config.selectedInputDeviceId };
+  mediaStream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+  audioContext = new AudioContext();
+  sourceNode = audioContext.createMediaStreamSource(mediaStream);
+  processorNode = audioContext.createScriptProcessor(4096, CHANNELS, CHANNELS);
+  muteNode = audioContext.createGain();
+  muteNode.gain.value = 0;
+
+  processorNode.onaudioprocess = (event) => {
+    if (isStopping || pendingAudio >= MAX_PENDING_AUDIO) return;
+    const pcm = downsampleToPcm16(event.inputBuffer.getChannelData(0), audioContext.sampleRate);
+    if (!pcm.byteLength) return;
+    pendingAudio += 1;
+    dictationApi().sendAudio(pcm).then((result) => {
+      if (result && result.status && result.status !== "accepted") {
+        // The bounded main-process queue rejected this frame. Dropping newest
+        // audio is intentional; never let renderer callbacks accumulate.
+      }
+    }).catch((error) => fail(error.message || "Could not send audio to dictation service"))
+      .finally(() => { pendingAudio = Math.max(0, pendingAudio - 1); });
+  };
+  sourceNode.connect(processorNode);
+  processorNode.connect(muteNode);
+  muteNode.connect(audioContext.destination);
+}
+
+async function start(config = {}) {
+  if (audioContext || isStopping) return;
+  let sessionStarted = false;
+  try {
+    finalSegments = [];
+    latestPartial = "";
+    isStopping = false;
+    listen();
+    // Only pass capture/transcription choices. URLs and credentials remain in main.
+    const result = await dictationApi().start({
+      language: config.language || null,
+      mode: config.mode || "fast",
+      sampleRate: TARGET_SAMPLE_RATE,
+      channels: CHANNELS,
+      format: "pcm_s16le",
+    });
+    if (result && result.status && result.status !== "accepted") {
+      throw new Error(result.message || "Dictation service is not ready");
+    }
+    sessionStarted = true;
+    await startAudio(config);
+    window.openflow.reportStatus("recording", "Listening...", true);
+  } catch (error) {
+    if (sessionStarted) {
+      // A microphone permission/device failure happens after main has created a
+      // session. Release it without delaying the user-visible error.
+      dictationApi().cancel().catch(() => {});
+    }
+    fail(error.message || "Could not start dictation");
+  }
+}
+
+async function stop() {
+  if (isStopping) return;
+  isStopping = true;
+  stopAudio();
+  try {
+    await dictationApi().stop();
+  } catch (error) {
+    fail(error.message || "Could not stop dictation");
+    return;
+  }
+  clearTimeout(stopTimer);
+  stopTimer = setTimeout(complete, 5000);
+}
+
+window.openflow.onStartDictation?.(start);
+window.openflow.onStopDictation?.(stop);
